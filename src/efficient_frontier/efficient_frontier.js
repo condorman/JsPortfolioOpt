@@ -1,5 +1,6 @@
 import { BaseOptimizerAdapter } from './_base.js'
 import { portfolioReturn, portfolioVariance } from '../objective_functions.js'
+import quadprog from 'quadprog'
 
 function parseWeightBounds(weightBounds, nAssets) {
   const isNumber = (v) => typeof v === 'number' && Number.isFinite(v)
@@ -62,55 +63,42 @@ function parseWeightBounds(weightBounds, nAssets) {
 
 function projectBoundedSimplex(vector, lower, upper, targetSum = 1) {
   const n = vector.length
-  let w = vector.map((v, i) => Math.min(Math.max(v, lower[i]), upper[i]))
+  const lowerSum = lower.reduce((acc, v) => acc + v, 0)
+  const upperSum = upper.reduce((acc, v) => acc + v, 0)
+  const clampedTarget = Math.min(Math.max(targetSum, lowerSum), upperSum)
 
-  for (let iteration = 0; iteration < 100; iteration += 1) {
-    const sum = w.reduce((acc, x) => acc + x, 0)
-    const diff = targetSum - sum
-    if (Math.abs(diff) < 1e-12) {
-      break
-    }
+  let lo = Number.POSITIVE_INFINITY
+  let hi = Number.NEGATIVE_INFINITY
+  for (let i = 0; i < n; i += 1) {
+    lo = Math.min(lo, vector[i] - upper[i])
+    hi = Math.max(hi, vector[i] - lower[i])
+  }
 
-    const free = []
+  const clipped = (x, i) => Math.min(Math.max(x, lower[i]), upper[i])
+  const summedAt = (lambda) => {
+    let sum = 0
     for (let i = 0; i < n; i += 1) {
-      const canIncrease = w[i] < upper[i] - 1e-12
-      const canDecrease = w[i] > lower[i] + 1e-12
-      if ((diff > 0 && canIncrease) || (diff < 0 && canDecrease)) {
-        free.push(i)
-      }
+      sum += clipped(vector[i] - lambda, i)
     }
-    if (free.length === 0) {
-      break
-    }
+    return sum
+  }
 
-    const delta = diff / free.length
-    for (const i of free) {
-      w[i] = Math.min(Math.max(w[i] + delta, lower[i]), upper[i])
+  for (let iter = 0; iter < 120; iter += 1) {
+    const mid = (lo + hi) / 2
+    const s = summedAt(mid)
+    if (s > clampedTarget) {
+      lo = mid
+    } else {
+      hi = mid
     }
   }
 
-  // Final stabilization: enforce exact sum if possible.
-  let remaining = targetSum - w.reduce((acc, x) => acc + x, 0)
-  if (Math.abs(remaining) > 1e-10) {
-    for (let i = 0; i < n; i += 1) {
-      if (remaining > 0) {
-        const room = upper[i] - w[i]
-        const add = Math.min(room, remaining)
-        w[i] += add
-        remaining -= add
-      } else {
-        const room = w[i] - lower[i]
-        const sub = Math.min(room, -remaining)
-        w[i] -= sub
-        remaining += sub
-      }
-      if (Math.abs(remaining) < 1e-10) {
-        break
-      }
-    }
+  const lambda = (lo + hi) / 2
+  const out = Array(n)
+  for (let i = 0; i < n; i += 1) {
+    out[i] = clipped(vector[i] - lambda, i)
   }
-
-  return w
+  return out
 }
 
 function numericalGradient(fn, w) {
@@ -140,6 +128,26 @@ function linspace(start, end, points) {
     out.push(start + step * i)
   }
   return out
+}
+
+function to1BasedVector(values) {
+  return [0, ...values]
+}
+
+function to1BasedMatrix(matrix) {
+  return [[], ...matrix.map((row) => [0, ...row])]
+}
+
+function addDiagonalJitter(matrix, jitter) {
+  return matrix.map((row, i) => row.map((value, j) => (i === j ? value + jitter : value)))
+}
+
+function dot(a, b) {
+  let acc = 0
+  for (let i = 0; i < a.length; i += 1) {
+    acc += a[i] * b[i]
+  }
+  return acc
 }
 
 export class EfficientFrontier extends BaseOptimizerAdapter {
@@ -214,11 +222,205 @@ export class EfficientFrontier extends BaseOptimizerAdapter {
     return (w) => objective(w) + this._extraPenalty(w)
   }
 
+  _canUseExactQp() {
+    return this._additionalObjectives.length === 0 && this._additionalConstraints.length === 0
+  }
+
+  _isFeasibleTargetSum(targetSum) {
+    const minSum = this._lowerBounds.reduce((acc, v) => acc + v, 0)
+    const maxSum = this._upperBounds.reduce((acc, v) => acc + v, 0)
+    return targetSum >= minSum - 1e-10 && targetSum <= maxSum + 1e-10
+  }
+
+  _buildConstraintSets({ targetSum = 1, minReturn = null } = {}) {
+    const eqConstraints = [{ a: Array(this.nAssets).fill(1), b: targetSum }]
+    const ineqConstraints = []
+
+    for (let i = 0; i < this.nAssets; i += 1) {
+      const lower = this._lowerBounds[i]
+      const upper = this._upperBounds[i]
+      const aLower = Array(this.nAssets).fill(0)
+      const aUpper = Array(this.nAssets).fill(0)
+      aLower[i] = 1
+      aUpper[i] = -1
+      ineqConstraints.push({ a: aLower, b: lower })
+      ineqConstraints.push({ a: aUpper, b: -upper })
+    }
+
+    if (minReturn != null) {
+      ineqConstraints.push({ a: this.expectedReturns.slice(), b: minReturn })
+    }
+
+    return { eqConstraints, ineqConstraints }
+  }
+
+  _solveQp({ D, d, eqConstraints = [], ineqConstraints = [] }) {
+    const n = this.nAssets
+    const allConstraints = [...eqConstraints, ...ineqConstraints]
+    const q = allConstraints.length
+    const meq = eqConstraints.length
+
+    const Amat = Array.from({ length: n + 1 }, () => Array(q + 1).fill(0))
+    const bvec = Array(q + 1).fill(0)
+    for (let j = 1; j <= q; j += 1) {
+      const { a, b } = allConstraints[j - 1]
+      bvec[j] = b
+      for (let i = 1; i <= n; i += 1) {
+        Amat[i][j] = a[i - 1]
+      }
+    }
+
+    const jitterLevels = [0, 1e-12, 1e-10, 1e-8, 1e-6, 1e-4]
+    for (const jitter of jitterLevels) {
+      const Dtry = jitter === 0 ? D : addDiagonalJitter(D, jitter)
+      const result = quadprog.solveQP(to1BasedMatrix(Dtry), to1BasedVector(d), Amat, bvec, meq)
+      if (result?.message) {
+        continue
+      }
+      const solution = (result?.solution ?? []).slice(1)
+      if (solution.length !== n) {
+        continue
+      }
+      if (!solution.every((v) => Number.isFinite(v))) {
+        continue
+      }
+      return solution
+    }
+
+    return null
+  }
+
+  _solveMinVarianceWeights({ targetSum = 1, minReturn = null } = {}) {
+    const D = this.covMatrix.map((row) => row.map((v) => 2 * v))
+    const d = Array(this.nAssets).fill(0)
+    const { eqConstraints, ineqConstraints } = this._buildConstraintSets({ targetSum, minReturn })
+    return this._solveQp({ D, d, eqConstraints, ineqConstraints })
+  }
+
+  _solveQuadraticUtilityWeights({ riskAversion = 1, targetSum = 1 } = {}) {
+    const D = this.covMatrix.map((row) => row.map((v) => riskAversion * v))
+    const d = this.expectedReturns.slice()
+    const { eqConstraints, ineqConstraints } = this._buildConstraintSets({ targetSum })
+    return this._solveQp({ D, d, eqConstraints, ineqConstraints })
+  }
+
+  _solveMaxReturnWeights({ targetSum = 1 } = {}) {
+    if (!this._isFeasibleTargetSum(targetSum)) {
+      return null
+    }
+
+    const w = this._lowerBounds.slice()
+    let remaining = targetSum - w.reduce((acc, v) => acc + v, 0)
+    if (remaining < -1e-10) {
+      return null
+    }
+
+    const order = Array.from({ length: this.nAssets }, (_, i) => i).sort(
+      (a, b) => this.expectedReturns[b] - this.expectedReturns[a],
+    )
+    for (const idx of order) {
+      if (remaining <= 1e-12) {
+        break
+      }
+      const room = this._upperBounds[idx] - w[idx]
+      const add = Math.min(room, remaining)
+      w[idx] += add
+      remaining -= add
+    }
+
+    if (remaining > 1e-8) {
+      return null
+    }
+    return w
+  }
+
+  _setSolvedWeights(weights) {
+    this.weights = weights.slice()
+    return this._mapVectorToWeights(this.weights)
+  }
+
   minVolatility() {
+    if (this._canUseExactQp() && this._isFeasibleTargetSum(this._targetSum)) {
+      const w = this._solveMinVarianceWeights({ targetSum: this._targetSum })
+      if (w) {
+        return this._setSolvedWeights(w)
+      }
+    }
     return this._optimize(this._penalized((w) => this._portfolioVariance(w)))
   }
 
   maxSharpe({ riskFreeRate = 0 } = {}) {
+    if (this._canUseExactQp() && this._isFeasibleTargetSum(this._targetSum)) {
+      const minVolW = this._solveMinVarianceWeights({ targetSum: this._targetSum })
+      const maxRetW = this._solveMaxReturnWeights({ targetSum: this._targetSum })
+      if (minVolW && maxRetW) {
+        const minRet = this._portfolioReturn(minVolW)
+        const maxRet = this._portfolioReturn(maxRetW)
+        const evalCache = new Map()
+
+        const evaluate = (targetReturn) => {
+          const key = targetReturn.toPrecision(16)
+          if (evalCache.has(key)) {
+            return evalCache.get(key)
+          }
+          const w = this._solveMinVarianceWeights({
+            targetSum: this._targetSum,
+            minReturn: targetReturn,
+          })
+          if (!w) {
+            evalCache.set(key, null)
+            return null
+          }
+          const ret = this._portfolioReturn(w)
+          const vol = Math.sqrt(Math.max(this._portfolioVariance(w), 0))
+          const sharpe =
+            vol === 0 ? Number.NEGATIVE_INFINITY : (ret - riskFreeRate) / vol
+          const out = { w, ret, vol, sharpe }
+          evalCache.set(key, out)
+          return out
+        }
+
+        let best = null
+        const consider = (candidate) => {
+          if (!candidate) {
+            return
+          }
+          if (!best || candidate.sharpe > best.sharpe) {
+            best = candidate
+          }
+        }
+
+        const gridPoints = 80
+        for (let i = 0; i <= gridPoints; i += 1) {
+          const t = i / gridPoints
+          const r = minRet + t * (maxRet - minRet)
+          consider(evaluate(r))
+        }
+
+        let left = minRet
+        let right = maxRet
+        for (let iter = 0; iter < 45; iter += 1) {
+          const r1 = left + (right - left) / 3
+          const r2 = right - (right - left) / 3
+          const c1 = evaluate(r1)
+          const c2 = evaluate(r2)
+          const s1 = c1 ? c1.sharpe : Number.NEGATIVE_INFINITY
+          const s2 = c2 ? c2.sharpe : Number.NEGATIVE_INFINITY
+          if (s1 < s2) {
+            left = r1
+          } else {
+            right = r2
+          }
+          consider(c1)
+          consider(c2)
+        }
+
+        if (best) {
+          return this._setSolvedWeights(best.w)
+        }
+      }
+    }
+
     return this._optimize(
       this._penalized((w) => {
         const variance = Math.max(this._portfolioVariance(w), 1e-16)
@@ -230,6 +432,16 @@ export class EfficientFrontier extends BaseOptimizerAdapter {
   }
 
   maxQuadraticUtility({ riskAversion = 1 } = {}) {
+    if (this._canUseExactQp() && this._isFeasibleTargetSum(this._targetSum)) {
+      const w = this._solveQuadraticUtilityWeights({
+        riskAversion,
+        targetSum: this._targetSum,
+      })
+      if (w) {
+        return this._setSolvedWeights(w)
+      }
+    }
+
     return this._optimize(
       this._penalized((w) => {
         const mu = this._portfolioReturn(w)
@@ -243,6 +455,51 @@ export class EfficientFrontier extends BaseOptimizerAdapter {
     if (marketNeutral) {
       this._targetSum = 0
     }
+
+    if (!marketNeutral && this._canUseExactQp() && this._isFeasibleTargetSum(this._targetSum)) {
+      const minVolW = this._solveMinVarianceWeights({ targetSum: this._targetSum })
+      const maxRetW = this._solveMaxReturnWeights({ targetSum: this._targetSum })
+      if (minVolW && maxRetW) {
+        const targetSigma = targetVolatility
+        const minVolSigma = Math.sqrt(Math.max(this._portfolioVariance(minVolW), 0))
+        if (minVolSigma >= targetSigma - 1e-10) {
+          this._targetSum = 1
+          return this._setSolvedWeights(minVolW)
+        }
+
+        const maxVolSigma = Math.sqrt(Math.max(this._portfolioVariance(maxRetW), 0))
+        if (maxVolSigma <= targetSigma + 1e-10) {
+          this._targetSum = 1
+          return this._setSolvedWeights(maxRetW)
+        }
+
+        let lo = this._portfolioReturn(minVolW)
+        let hi = this._portfolioReturn(maxRetW)
+        let best = minVolW
+        for (let iter = 0; iter < 70; iter += 1) {
+          const mid = (lo + hi) / 2
+          const w = this._solveMinVarianceWeights({
+            targetSum: this._targetSum,
+            minReturn: mid,
+          })
+          if (!w) {
+            hi = mid
+            continue
+          }
+          const sigma = Math.sqrt(Math.max(this._portfolioVariance(w), 0))
+          if (sigma <= targetSigma + 1e-10) {
+            lo = mid
+            best = w
+          } else {
+            hi = mid
+          }
+        }
+
+        this._targetSum = 1
+        return this._setSolvedWeights(best)
+      }
+    }
+
     const penaltyScale = 5e3
     const result = this._optimize(
       this._penalized((w) => {
@@ -261,6 +518,18 @@ export class EfficientFrontier extends BaseOptimizerAdapter {
     if (marketNeutral) {
       this._targetSum = 0
     }
+
+    if (!marketNeutral && this._canUseExactQp() && this._isFeasibleTargetSum(this._targetSum)) {
+      const w = this._solveMinVarianceWeights({
+        targetSum: this._targetSum,
+        minReturn: targetReturn,
+      })
+      if (w) {
+        this._targetSum = 1
+        return this._setSolvedWeights(w)
+      }
+    }
+
     const penaltyScale = 5e3
     const result = this._optimize(
       this._penalized((w) => {
@@ -275,6 +544,13 @@ export class EfficientFrontier extends BaseOptimizerAdapter {
   }
 
   maxReturn() {
+    if (this._canUseExactQp() && this._isFeasibleTargetSum(this._targetSum)) {
+      const w = this._solveMaxReturnWeights({ targetSum: this._targetSum })
+      if (w) {
+        return this._setSolvedWeights(w)
+      }
+    }
+
     let best = 0
     let bestIdx = 0
     for (let i = 0; i < this.expectedReturns.length; i += 1) {

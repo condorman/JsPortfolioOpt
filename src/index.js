@@ -1,6 +1,7 @@
 export * from './expected_returns.js'
 export * from './risk_models.js'
 export * from './objective_functions.js'
+export * from './base_optimizer.js'
 export * from './discrete_allocation.js'
 export * from './black_litterman.js'
 export * from './cla.js'

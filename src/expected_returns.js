@@ -30,12 +30,18 @@ function pricesFromReturnsImpl(returns, { logReturns = false } = {}) {
   const rows = returns.length
   const cols = returns[0].length
 
-  const out = Array.from({ length: rows + 1 }, () => Array(cols).fill(1))
-  for (let r = 1; r < rows + 1; r += 1) {
+  // Match PyPortfolioOpt: set first pseudo-price row to 1, then cumulative product.
+  const out = Array.from({ length: rows }, () => Array(cols).fill(1))
+  if (rows === 0) {
+    return out
+  }
+  const running = Array(cols).fill(1)
+  for (let r = 1; r < rows; r += 1) {
     for (let c = 0; c < cols; c += 1) {
-      const ret = returns[r - 1][c]
+      const ret = returns[r][c]
       const growth = logReturns ? Math.exp(ret) : 1 + ret
-      out[r][c] = out[r - 1][c] * growth
+      running[c] *= growth
+      out[r][c] = running[c]
     }
   }
   return out
@@ -60,18 +66,26 @@ function meanHistoricalReturnImpl(
 
   return Array.from({ length: cols }, (_, c) => {
     const assetReturns = column(returns, c)
-    const mu = mean(assetReturns)
-    return annualize(mu, frequency, compounding)
+    if (compounding) {
+      let growth = 1
+      for (const r of assetReturns) {
+        growth *= 1 + r
+      }
+      return growth ** (frequency / assetReturns.length) - 1
+    }
+    return mean(assetReturns) * frequency
   })
 }
 
-function ema(values, span) {
+function ewmMeanAdjustTrue(values, span) {
   const alpha = 2 / (span + 1)
-  let e = values[0]
-  for (let i = 1; i < values.length; i += 1) {
-    e = alpha * values[i] + (1 - alpha) * e
+  let numerator = 0
+  let denominator = 0
+  for (const value of values) {
+    numerator = value + (1 - alpha) * numerator
+    denominator = 1 + (1 - alpha) * denominator
   }
-  return e
+  return denominator === 0 ? 0 : numerator / denominator
 }
 
 function emaHistoricalReturnImpl(
@@ -90,8 +104,8 @@ function emaHistoricalReturnImpl(
 
   return Array.from({ length: cols }, (_, c) => {
     const assetReturns = column(returns, c)
-    const mu = ema(assetReturns, span)
-    return annualize(mu, frequency, compounding)
+    const mu = ewmMeanAdjustTrue(assetReturns, span)
+    return compounding ? (1 + mu) ** frequency - 1 : mu * frequency
   })
 }
 
@@ -106,24 +120,41 @@ function capmReturnImpl(
     logReturns = false,
   } = {},
 ) {
-  const returns = returnsData ? prices : returnsFromPricesImpl(prices, { logReturns })
+  let returns = returnsData ? prices : returnsFromPricesImpl(prices, { logReturns })
   validateMatrix('returns', returns)
 
-  const marketReturns = marketPrices
-    ? returnsFromPricesImpl(marketPrices, { logReturns }).map((row) => row[0])
-    : returns.map((row) => mean(row))
+  let marketReturns = null
+  if (marketPrices) {
+    marketReturns = returnsData
+      ? marketPrices.map((row) => row[0])
+      : returnsFromPricesImpl(marketPrices, { logReturns }).map((row) => row[0])
+  } else {
+    marketReturns = returns.map((row) => mean(row))
+  }
 
-  const mktMean = annualize(mean(marketReturns), frequency, compounding)
+  // Align on the latest common window when inputs have different lengths.
+  const n = Math.min(returns.length, marketReturns.length)
+  returns = returns.slice(-n)
+  marketReturns = marketReturns.slice(-n)
 
-  const mktVariance = (() => {
-    const m = mean(marketReturns)
-    let acc = 0
-    for (const v of marketReturns) {
-      const d = v - m
-      acc += d * d
+  const mktMean = (() => {
+    if (compounding) {
+      let growth = 1
+      for (const r of marketReturns) {
+        growth *= 1 + r
+      }
+      return growth ** (frequency / marketReturns.length) - 1
     }
-    return acc / Math.max(marketReturns.length - 1, 1)
+    return mean(marketReturns) * frequency
   })()
+
+  const marketMean = mean(marketReturns)
+  let mktVariance = 0
+  for (const v of marketReturns) {
+    const d = v - marketMean
+    mktVariance += d * d
+  }
+  mktVariance /= Math.max(marketReturns.length - 1, 1)
 
   const cols = returns[0].length
   return Array.from({ length: cols }, (_, c) => {
@@ -131,7 +162,7 @@ function capmReturnImpl(
     const assetMean = mean(asset)
     let cov = 0
     for (let i = 0; i < asset.length; i += 1) {
-      cov += (asset[i] - assetMean) * (marketReturns[i] - mean(marketReturns))
+      cov += (asset[i] - assetMean) * (marketReturns[i] - marketMean)
     }
     cov /= Math.max(asset.length - 1, 1)
     const beta = mktVariance === 0 ? 0 : cov / mktVariance

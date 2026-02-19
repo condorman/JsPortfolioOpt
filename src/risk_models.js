@@ -1,5 +1,5 @@
 import { EigenvalueDecomposition, Matrix } from 'ml-matrix'
-import { column, covariance, validateMatrix } from './_utils/math.js'
+import { column, covariance, mean, validateMatrix } from './_utils/math.js'
 import { returnsFromPrices } from './expected_returns.js'
 
 export function isPositiveSemidefinite(matrix) {
@@ -83,7 +83,7 @@ export function semicovariance(
   prices,
   {
     returnsData = false,
-    benchmark = 0,
+    benchmark = 0.000079,
     frequency = 252,
     logReturns = false,
     fixMethod = 'spectral',
@@ -92,19 +92,158 @@ export function semicovariance(
   const returns = returnsData ? prices : returnsFromPrices(prices, { logReturns })
   validateMatrix('returns', returns)
   const downside = returns.map((row) => row.map((v) => Math.min(v - benchmark, 0)))
-  const cov = computeCovarianceMatrix(downside, frequency)
+  const cols = downside[0].length
+  const T = downside.length
+  const cov = Array.from({ length: cols }, () => Array(cols).fill(0))
+  for (let i = 0; i < cols; i += 1) {
+    for (let j = i; j < cols; j += 1) {
+      let acc = 0
+      for (let t = 0; t < T; t += 1) {
+        acc += downside[t][i] * downside[t][j]
+      }
+      const value = (acc / T) * frequency
+      cov[i][j] = value
+      cov[j][i] = value
+    }
+  }
   return fixNonpositiveSemidefinite(cov, { fixMethod })
 }
 
-function weightedCovariance(x, y, span) {
+function pairExpCovariance(x, y, span) {
   const alpha = 2 / (span + 1)
-  const n = x.length
-  const weights = Array.from({ length: n }, (_, i) => (1 - alpha) ** (n - 1 - i))
-  const wSum = weights.reduce((acc, v) => acc + v, 0)
-  const mx = weights.reduce((acc, w, i) => acc + w * x[i], 0) / wSum
-  const my = weights.reduce((acc, w, i) => acc + w * y[i], 0) / wSum
-  const cov = weights.reduce((acc, w, i) => acc + w * (x[i] - mx) * (y[i] - my), 0) / wSum
-  return cov
+  const mx = mean(x)
+  const my = mean(y)
+  let numerator = 0
+  let denominator = 0
+  for (let i = 0; i < x.length; i += 1) {
+    const covariation = (x[i] - mx) * (y[i] - my)
+    numerator = covariation + (1 - alpha) * numerator
+    denominator = 1 + (1 - alpha) * denominator
+  }
+  return denominator === 0 ? 0 : numerator / denominator
+}
+
+function nanToNumMatrix(matrix) {
+  return matrix.map((row) => row.map((v) => (Number.isFinite(v) ? v : 0)))
+}
+
+function empiricalCovarianceMle(X, { assumeCentered = false } = {}) {
+  validateMatrix('X', X)
+  const nSamples = X.length
+  const nFeatures = X[0].length
+  const means = Array(nFeatures).fill(0)
+
+  if (!assumeCentered) {
+    for (let j = 0; j < nFeatures; j += 1) {
+      for (let i = 0; i < nSamples; i += 1) {
+        means[j] += X[i][j]
+      }
+      means[j] /= nSamples
+    }
+  }
+
+  const out = Array.from({ length: nFeatures }, () => Array(nFeatures).fill(0))
+  for (let i = 0; i < nFeatures; i += 1) {
+    for (let j = i; j < nFeatures; j += 1) {
+      let acc = 0
+      for (let t = 0; t < nSamples; t += 1) {
+        const xi = assumeCentered ? X[t][i] : X[t][i] - means[i]
+        const xj = assumeCentered ? X[t][j] : X[t][j] - means[j]
+        acc += xi * xj
+      }
+      const cov = acc / nSamples
+      out[i][j] = cov
+      out[j][i] = cov
+    }
+  }
+  return out
+}
+
+function ledoitWolfConstantVariance(X) {
+  validateMatrix('X', X)
+  const nSamples = X.length
+  const nFeatures = X[0].length
+  if (nFeatures === 1) {
+    return { covariance: empiricalCovarianceMle(X), shrinkage: 0 }
+  }
+
+  const empCov = empiricalCovarianceMle(X)
+  const mu = empCov.reduce((acc, row, i) => acc + row[i], 0) / nFeatures
+
+  let delta = 0
+  for (let i = 0; i < nFeatures; i += 1) {
+    for (let j = 0; j < nFeatures; j += 1) {
+      const centered = empCov[i][j] - (i === j ? mu : 0)
+      delta += centered * centered
+    }
+  }
+  delta /= nFeatures
+
+  let betaNumerator = 0
+  for (let i = 0; i < nFeatures; i += 1) {
+    for (let j = 0; j < nFeatures; j += 1) {
+      let dotX2 = 0
+      for (let t = 0; t < nSamples; t += 1) {
+        dotX2 += X[t][i] * X[t][i] * X[t][j] * X[t][j]
+      }
+      betaNumerator += dotX2 / nSamples - empCov[i][j] * empCov[i][j]
+    }
+  }
+
+  const betaRaw = betaNumerator / (nFeatures * nSamples)
+  const beta = Math.min(betaRaw, delta)
+  const shrinkage = delta === 0 ? 0 : beta / delta
+
+  const shrunk = Array.from({ length: nFeatures }, (_, i) =>
+    Array.from({ length: nFeatures }, (_, j) => {
+      const target = i === j ? mu : 0
+      return (1 - shrinkage) * empCov[i][j] + shrinkage * target
+    }),
+  )
+
+  return { covariance: shrunk, shrinkage }
+}
+
+function oasEstimator(X) {
+  validateMatrix('X', X)
+  const nSamples = X.length
+  const nFeatures = X[0].length
+
+  if (nFeatures === 1) {
+    const mean = X.reduce((acc, row) => acc + row[0], 0) / nSamples
+    const variance = X.reduce((acc, row) => {
+      const d = row[0] - mean
+      return acc + d * d
+    }, 0) / nSamples
+    return { covariance: [[variance]], shrinkage: 0 }
+  }
+
+  const empCov = empiricalCovarianceMle(X)
+  let sumSquares = 0
+  for (let i = 0; i < nFeatures; i += 1) {
+    for (let j = 0; j < nFeatures; j += 1) {
+      sumSquares += empCov[i][j] * empCov[i][j]
+    }
+  }
+
+  const alpha = sumSquares / (nFeatures * nFeatures)
+  const mu = empCov.reduce((acc, row, i) => acc + row[i], 0) / nFeatures
+  const muSquared = mu * mu
+  const num = alpha + muSquared
+  const den = (nSamples + 1) * (alpha - muSquared / nFeatures)
+  const shrinkage = den === 0 ? 1 : Math.min(num / den, 1)
+
+  const shrunk = Array.from({ length: nFeatures }, (_, i) =>
+    Array.from({ length: nFeatures }, (_, j) => {
+      let value = (1 - shrinkage) * empCov[i][j]
+      if (i === j) {
+        value += shrinkage * mu
+      }
+      return value
+    }),
+  )
+
+  return { covariance: shrunk, shrinkage }
 }
 
 function median(values) {
@@ -181,7 +320,7 @@ export function expCov(
     const xi = column(returns, i)
     for (let j = i; j < cols; j += 1) {
       const xj = column(returns, j)
-      const cov = weightedCovariance(xi, xj, span) * frequency
+      const cov = pairExpCovariance(xi, xj, span) * frequency
       out[i][j] = cov
       out[j][i] = cov
     }
@@ -230,6 +369,7 @@ export function riskMatrix(prices, { method = 'sample_cov', ...kwargs } = {}) {
     case 'sample_cov':
       return sampleCov(prices, kwargs)
     case 'semicovariance':
+    case 'semivariance':
       return semicovariance(prices, kwargs)
     case 'exp_cov':
       return expCov(prices, kwargs)
@@ -244,30 +384,51 @@ export class CovarianceShrinkage {
   constructor(prices, { returnsData = false, frequency = 252, logReturns = false } = {}) {
     this.frequency = frequency
     this.returns = returnsData ? prices : returnsFromPrices(prices, { logReturns })
-    this.sample = computeCovarianceMatrix(this.returns, frequency)
+    // Match PyPortfolioOpt: S is daily sample covariance (unannualized).
+    this.sample = computeCovarianceMatrix(this.returns, 1)
+    this.S = this.sample
+    this.delta = null
+  }
+
+  _formatAndAnnualize(covDaily) {
+    const annualized = covDaily.map((row) => row.map((v) => v * this.frequency))
+    return fixNonpositiveSemidefinite(annualized, { fixMethod: 'spectral' })
   }
 
   shrunkCovariance({ delta = 0.2 } = {}) {
+    this.delta = delta
     const n = this.sample.length
     const avgVar = this.sample.reduce((acc, row, i) => acc + row[i], 0) / n
     const target = Array.from({ length: n }, (_, i) =>
       Array.from({ length: n }, (_, j) => (i === j ? avgVar : 0)),
     )
 
-    return this.sample.map((row, i) =>
+    const shrunk = this.sample.map((row, i) =>
       row.map((value, j) => delta * target[i][j] + (1 - delta) * value),
     )
+    return this._formatAndAnnualize(shrunk)
   }
 
   ledoitWolf({ shrinkageTarget = 'constant_variance' } = {}) {
-    if (!['constant_variance', 'single_factor', 'constant_correlation'].includes(shrinkageTarget)) {
+    if (
+      !['constant_variance', 'single_factor', 'constant_correlation'].includes(shrinkageTarget)
+    ) {
       throw new Error(`ledoit_wolf: target ${shrinkageTarget} not implemented`)
     }
-    return this.shrunkCovariance({ delta: 0.2 })
+
+    // `constant_variance` matches sklearn's Ledoit-Wolf estimator.
+    // For the other targets, keep deterministic behavior using the same backend for now.
+    const X = nanToNumMatrix(this.returns)
+    const { covariance, shrinkage } = ledoitWolfConstantVariance(X)
+    this.delta = shrinkage
+    return this._formatAndAnnualize(covariance)
   }
 
   oracleApproximating() {
-    return this.shrunkCovariance({ delta: 0.5 })
+    const X = nanToNumMatrix(this.returns)
+    const { covariance, shrinkage } = oasEstimator(X)
+    this.delta = shrinkage
+    return this._formatAndAnnualize(covariance)
   }
 }
 

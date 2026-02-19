@@ -4,6 +4,19 @@ function isFiniteNumber(value) {
   return typeof value === 'number' && Number.isFinite(value)
 }
 
+function cloneValue(value) {
+  if (Array.isArray(value)) {
+    return value.map((item) => cloneValue(item))
+  }
+  if (value instanceof Map) {
+    return new Map(Array.from(value.entries(), ([k, v]) => [k, cloneValue(v)]))
+  }
+  if (value && typeof value === 'object' && value.constructor === Object) {
+    return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, cloneValue(v)]))
+  }
+  return value
+}
+
 function normalizeTickers(nAssets, tickers) {
   if (tickers == null) {
     return Array.from({ length: nAssets }, (_, i) => String(i))
@@ -31,6 +44,7 @@ export class BaseOptimizerAdapter {
     this.weights = null
     this._additionalObjectives = []
     this._additionalConstraints = []
+    this._parameters = new Map()
   }
 
   _mapVectorToWeights(vector) {
@@ -100,6 +114,36 @@ export class BaseOptimizerAdapter {
 
   add_constraint(constraint) {
     return this.addConstraint(constraint)
+  }
+
+  deepcopy() {
+    const copy = Object.create(Object.getPrototypeOf(this))
+    for (const [key, value] of Object.entries(this)) {
+      copy[key] = cloneValue(value)
+    }
+    return copy
+  }
+
+  isParameterDefined(name) {
+    return this._parameters.has(name)
+  }
+
+  updateParameterValue(name, value) {
+    if (typeof name !== 'string' || name.length === 0) {
+      throw new TypeError('parameter name must be a non-empty string')
+    }
+    if (!isFiniteNumber(value)) {
+      throw new TypeError('parameter value must be a finite number')
+    }
+    this._parameters.set(name, value)
+  }
+
+  is_parameter_defined(...args) {
+    return this.isParameterDefined(...args)
+  }
+
+  update_parameter_value(...args) {
+    return this.updateParameterValue(...args)
   }
 
   _extraPenalty(weights) {

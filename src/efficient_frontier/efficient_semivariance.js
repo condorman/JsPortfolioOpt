@@ -42,8 +42,7 @@ function covarianceFromReturns(returns, frequency) {
 
 function semideviation(portfolioReturns, benchmark = 0) {
   const downside = portfolioReturns.map((r) => Math.min(r - benchmark, 0))
-  const variance =
-    downside.reduce((acc, d) => acc + d * d, 0) / Math.max(portfolioReturns.length - 1, 1)
+  const variance = downside.reduce((acc, d) => acc + d * d, 0) / Math.max(portfolioReturns.length, 1)
   return Math.sqrt(Math.max(variance, 0))
 }
 
@@ -80,6 +79,18 @@ export class EfficientSemivariance extends EfficientFrontier {
     if (marketNeutral) {
       this._targetSum = 0
     }
+
+    // If the max-return portfolio is already within the downside-risk cap,
+    // the constrained optimum is exactly max-return.
+    const maxRetWeightsByTicker = this.maxReturn()
+    const candidate = this.tickers.map((ticker) => maxRetWeightsByTicker[ticker])
+    const candidateSemi = Math.sqrt(Math.max(this._semivariance(candidate), 0))
+    if (candidateSemi <= targetSemideviation + 1e-10) {
+      this.weights = candidate
+      this._targetSum = 1
+      return this._mapVectorToWeights(this.weights)
+    }
+
     const penaltyScale = 5e3
     const result = this._optimize(
       this._penalized((w) => {

@@ -11,7 +11,9 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "ml-matrix": "^6.12.1"
+    "javascript-lp-solver": "^0.4.24",
+    "ml-matrix": "^6.12.1",
+    "quadprog": "^1.6.1"
   },
   "devDependencies": {
     "vitest": "^2.1.9"

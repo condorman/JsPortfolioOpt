@@ -77,7 +77,7 @@ export function exAnteTrackingError(weights, covMatrix, benchmarkWeights) {
     throw new Error('weights and benchmarkWeights must have same length')
   }
   const diff = w.map((v, i) => v - b[i])
-  return Math.sqrt(Math.max(portfolioVariance(diff, covMatrix), 0))
+  return portfolioVariance(diff, covMatrix)
 }
 
 export function exPostTrackingError(weights, historicReturns, benchmarkReturns) {
@@ -90,12 +90,10 @@ export function exPostTrackingError(weights, historicReturns, benchmarkReturns) 
 
   const activeReturns = historicReturns.map((row, i) => dot(row, w) - bm[i])
   const mean = activeReturns.reduce((acc, v) => acc + v, 0) / activeReturns.length
-  const variance =
-    activeReturns.reduce((acc, v) => {
-      const d = v - mean
-      return acc + d * d
-    }, 0) / Math.max(activeReturns.length - 1, 1)
-  return Math.sqrt(Math.max(variance, 0))
+  return activeReturns.reduce((acc, v) => {
+    const d = v - mean
+    return acc + d * d
+  }, 0)
 }
 
 // Python-style aliases

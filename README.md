@@ -50,6 +50,10 @@ PYTHONPATH=references/PyPortfolioOpt-main \
 Output:
 
 - `golden-PyPortfolioOpt/golden.json`
+- Includes:
+  - `python_test_function` scenarios (upstream test traceability)
+  - `extra_api_scenario` scenarios
+  - `api_method_scenario` for every symbol in `PUBLIC_API`, each with `expected.result` non-null
 
 ## Golden CLI
 

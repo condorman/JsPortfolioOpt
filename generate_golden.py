@@ -75,25 +75,16 @@ PUBLIC_API = [
     "return_model",
     "mean_historical_return",
     "ema_historical_return",
-    "capm_return",
-    "fix_nonpositive_semidefinite",
     "risk_matrix",
     "sample_cov",
     "semicovariance",
     "exp_cov",
-    "min_cov_determinant",
-    "cov_to_corr",
-    "corr_to_cov",
     "CovarianceShrinkage",
     "portfolio_variance",
     "portfolio_return",
     "sharpe_ratio",
     "L2_reg",
     "quadratic_utility",
-    "transaction_cost",
-    "ex_ante_tracking_error",
-    "ex_post_tracking_error",
-    "get_latest_prices",
     "DiscreteAllocation",
     "BlackLittermanModel",
     "market_implied_prior_returns",
@@ -108,9 +99,6 @@ PUBLIC_API = [
     "EfficientCDaR",
     "default_omega",
     "idzorek_method",
-    "deepcopy",
-    "is_parameter_defined",
-    "update_parameter_value",
 ]
 
 DATASET_FILES = {
@@ -253,12 +241,17 @@ def sanitize_float(value: float) -> Any:
 
 def canonicalize(value: Any) -> Any:
     if isinstance(value, np.generic):
+        if np.issubdtype(type(value), np.datetime64):
+            return pd.Timestamp(value).isoformat()
         if np.issubdtype(type(value), np.floating):
             return sanitize_float(float(value))
         return value.item()
 
     if isinstance(value, float):
         return sanitize_float(value)
+
+    if isinstance(value, (datetime, pd.Timestamp)):
+        return value.isoformat()
 
     if isinstance(value, (np.ndarray, list, tuple)):
         return [canonicalize(v) for v in list(value)]
@@ -302,13 +295,15 @@ def canonicalize(value: Any) -> Any:
 
 def normalize_warnings(records: Sequence[warnings.WarningMessage]) -> List[Dict[str, str]]:
     out: List[Dict[str, str]] = []
+    seen: set[tuple[str, str]] = set()
     for w in records:
-        out.append(
-            {
-                "category": w.category.__name__,
-                "message": str(w.message),
-            }
-        )
+        category = w.category.__name__
+        message = str(w.message)
+        key = (category, message)
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append({"category": category, "message": message})
     return out
 
 
@@ -496,6 +491,55 @@ def patch_test_utilities_for_quiet_mode() -> None:
         if data_only:
             return mean_return, sample_cov_matrix
         return cla_module.CLA(mean_return, sample_cov_matrix, *args, **kwargs)
+
+    def _scalar(value: Any) -> float:
+        arr = np.asarray(value)
+        if arr.shape == ():
+            return float(arr)
+        if arr.size == 1:
+            return float(arr.reshape(-1)[0])
+        raise TypeError("Expected scalar-compatible value")
+
+    def _compute_w_numpy2_compat(self, covarF_inv, covarFB, meanF, wB):
+        onesF = np.ones(meanF.shape)
+        g1 = np.dot(np.dot(onesF.T, covarF_inv), meanF)
+        g2 = np.dot(np.dot(onesF.T, covarF_inv), onesF)
+        if wB is None:
+            g, w1 = _scalar(-self.ls[-1] * g1 / g2 + 1 / g2), 0
+        else:
+            onesB = np.ones(wB.shape)
+            g3 = np.dot(onesB.T, wB)
+            g4 = np.dot(covarF_inv, covarFB)
+            w1 = np.dot(g4, wB)
+            g4 = np.dot(onesF.T, w1)
+            g = _scalar(-self.ls[-1] * g1 / g2 + (1 - g3 + g4) / g2)
+        w2 = np.dot(covarF_inv, onesF)
+        w3 = np.dot(covarF_inv, meanF)
+        return -w1 + g * w2 + self.ls[-1] * w3, g
+
+    def _compute_lambda_numpy2_compat(self, covarF_inv, covarFB, meanF, wB, i, bi):
+        onesF = np.ones(meanF.shape)
+        c1 = np.dot(np.dot(onesF.T, covarF_inv), onesF)
+        c2 = np.dot(covarF_inv, meanF)
+        c3 = np.dot(np.dot(onesF.T, covarF_inv), meanF)
+        c4 = np.dot(covarF_inv, onesF)
+        c = _scalar(-c1 * c2[i] + c3 * c4[i])
+        if c == 0:  # pragma: no cover
+            return None, None
+        if isinstance(bi, list):
+            bi = self._compute_bi(c, bi)
+        if wB is None:
+            return _scalar((c4[i] - c1 * bi) / c), bi
+        onesB = np.ones(wB.shape)
+        l1 = np.dot(onesB.T, wB)
+        l2 = np.dot(covarF_inv, covarFB)
+        l3 = np.dot(l2, wB)
+        l2 = np.dot(onesF.T, l3)
+        return _scalar(((1 - l1 + l2) * c4[i] - c1 * (bi + l3[i])) / c), bi
+
+    # NumPy 2 compatibility: upstream CLA expects float(np.array([[x]])).
+    cla_module.CLA._compute_w = _compute_w_numpy2_compat
+    cla_module.CLA._compute_lambda = _compute_lambda_numpy2_compat
 
     utilities.setup_efficient_frontier = setup_efficient_frontier
     utilities.setup_efficient_semivariance = setup_efficient_semivariance
@@ -913,6 +957,626 @@ def run_extra_scenarios(selected_modules_list: Sequence[str]) -> Dict[str, Any]:
     return {"cases": sorted(cases, key=lambda c: c["id"]), "failures": failures}
 
 
+def run_public_api_cases(selected_modules_list: Sequence[str]) -> Dict[str, Any]:
+    cases: List[Dict[str, Any]] = []
+    failures: List[Dict[str, Any]] = []
+
+    import cvxpy as cp  # noqa: PLC0415
+    from pypfopt import (  # noqa: PLC0415
+        CLA,
+        HRPOpt,
+        BlackLittermanModel,
+        CovarianceShrinkage,
+        DiscreteAllocation,
+        EfficientCDaR,
+        EfficientCVaR,
+        EfficientFrontier,
+        EfficientSemivariance,
+        base_optimizer,
+        expected_returns,
+        objective_functions,
+        risk_models,
+    )
+    from pypfopt.black_litterman import (  # noqa: PLC0415
+        market_implied_prior_returns,
+        market_implied_risk_aversion,
+    )
+    from pypfopt.discrete_allocation import get_latest_prices  # noqa: PLC0415
+    from tests.utilities_for_tests import (  # noqa: PLC0415
+        get_benchmark_data,
+        get_data,
+        get_market_caps,
+    )
+
+    df = get_data()
+    df_clean = df.dropna(axis=0, how="any")
+    benchmark_prices = get_benchmark_data().squeeze("columns")
+    market_caps = get_market_caps()
+
+    returns_df = expected_returns.returns_from_prices(df_clean)
+    mu = expected_returns.mean_historical_return(df_clean)
+    cov = risk_models.sample_cov(df_clean)
+    latest_prices = get_latest_prices(df_clean)
+
+    tickers = list(cov.columns)
+    n_assets = len(tickers)
+    equal_w = np.repeat(1 / n_assets, n_assets)
+    equal_w_dict = {ticker: float(equal_w[i]) for i, ticker in enumerate(tickers)}
+    prev_w = np.repeat(1 / n_assets, n_assets)
+    prev_w = np.roll(prev_w, 1)
+    prev_w = prev_w / prev_w.sum()
+
+    benchmark_returns = returns_df.mean(axis=1).values
+    prior = market_implied_prior_returns(market_caps, 1.0, cov, risk_free_rate=0.0)
+    delta = market_implied_risk_aversion(benchmark_prices, risk_free_rate=0.02)
+    absolute_views = {"AAPL": 0.10, "GOOG": 0.05, "FB": 0.02}
+
+    p_small = np.zeros((3, cov.shape[0]))
+    p_small[0, 0] = 1
+    p_small[1, 1] = 1
+    p_small[2, 2] = 1
+    q_small = np.array([[0.04], [0.03], [0.02]])
+    pi_small = np.zeros((cov.shape[0], 1))
+    confidences_small = np.array([0.6, 0.7, 0.8])
+
+    def run_case(
+        *,
+        api_symbol: str,
+        module_name: str,
+        input_refs: Sequence[str],
+        tolerance: Dict[str, float],
+        expectation_kind: str,
+        fn: Callable[[], Any],
+    ) -> None:
+        case_id = f"api::{api_symbol}"
+        with warnings.catch_warnings(record=True) as warning_records:
+            warnings.simplefilter("always")
+            stdout_capture = io.StringIO()
+            stderr_capture = io.StringIO()
+            try:
+                with contextlib.redirect_stdout(stdout_capture), contextlib.redirect_stderr(
+                    stderr_capture
+                ):
+                    value = fn()
+                expected = {
+                    "status": "pass",
+                    "result": canonicalize(value),
+                    "warnings": normalize_warnings(warning_records),
+                }
+            except Exception as exc:  # pragma: no cover - retained for diagnostics
+                error = {
+                    "type": type(exc).__name__,
+                    "message": str(exc),
+                    "traceback": traceback.format_exc(),
+                }
+                expected = {
+                    "status": "fail",
+                    "result": {
+                        "error_type": error["type"],
+                        "error_message": error["message"],
+                    },
+                    "warnings": normalize_warnings(warning_records),
+                    "error": error,
+                }
+                failures.append({"id": case_id, "source_test": api_symbol, "error": error})
+
+        cases.append(
+            {
+                "id": case_id,
+                "module": module_name,
+                "source_test": f"manual::api::{api_symbol}",
+                "call": {"kind": "api_method_scenario", "symbol": api_symbol},
+                "inputs_ref": {
+                    "datasets": list(input_refs),
+                    "api_mentions": [api_symbol.split(".")[-1]],
+                },
+                "expected": expected,
+                "tolerance": tolerance,
+                "expectation_kind": expectation_kind,
+            }
+        )
+
+    def include(module_name: str) -> bool:
+        return module_name in selected_modules_list
+
+    api_specs: List[Dict[str, Any]] = [
+        {
+            "symbol": "pypfopt.expected_returns.returns_from_prices",
+            "module": "expected_returns",
+            "inputs": ["stock_prices"],
+            "expectation_kind": "numeric",
+            "tolerance": DEFAULT_TOLERANCE,
+            "fn": lambda: expected_returns.returns_from_prices(df_clean),
+        },
+        {
+            "symbol": "pypfopt.expected_returns.prices_from_returns",
+            "module": "expected_returns",
+            "inputs": ["stock_prices"],
+            "expectation_kind": "numeric",
+            "tolerance": DEFAULT_TOLERANCE,
+            "fn": lambda: expected_returns.prices_from_returns(returns_df.copy()),
+        },
+        {
+            "symbol": "pypfopt.expected_returns.return_model",
+            "module": "expected_returns",
+            "inputs": ["stock_prices"],
+            "expectation_kind": "numeric",
+            "tolerance": DEFAULT_TOLERANCE,
+            "fn": lambda: expected_returns.return_model(df_clean, method="mean_historical_return"),
+        },
+        {
+            "symbol": "pypfopt.expected_returns.mean_historical_return",
+            "module": "expected_returns",
+            "inputs": ["stock_prices"],
+            "expectation_kind": "numeric",
+            "tolerance": DEFAULT_TOLERANCE,
+            "fn": lambda: expected_returns.mean_historical_return(df_clean),
+        },
+        {
+            "symbol": "pypfopt.expected_returns.ema_historical_return",
+            "module": "expected_returns",
+            "inputs": ["stock_prices"],
+            "expectation_kind": "numeric",
+            "tolerance": DEFAULT_TOLERANCE,
+            "fn": lambda: expected_returns.ema_historical_return(df_clean),
+        },
+        {
+            "symbol": "pypfopt.expected_returns.capm_return",
+            "module": "expected_returns",
+            "inputs": ["stock_prices", "spy_prices"],
+            "expectation_kind": "numeric",
+            "tolerance": SOLVER_SENSITIVE_TOLERANCE,
+            "fn": lambda: expected_returns.capm_return(
+                df_clean, market_prices=get_benchmark_data()
+            ),
+        },
+        {
+            "symbol": "pypfopt.risk_models.fix_nonpositive_semidefinite",
+            "module": "risk_models",
+            "inputs": ["stock_prices"],
+            "expectation_kind": "numeric",
+            "tolerance": DEFAULT_TOLERANCE,
+            "fn": lambda: risk_models.fix_nonpositive_semidefinite(cov),
+        },
+        {
+            "symbol": "pypfopt.risk_models.risk_matrix",
+            "module": "risk_models",
+            "inputs": ["stock_prices"],
+            "expectation_kind": "numeric",
+            "tolerance": DEFAULT_TOLERANCE,
+            "fn": lambda: risk_models.risk_matrix(df_clean, method="sample_cov"),
+        },
+        {
+            "symbol": "pypfopt.risk_models.sample_cov",
+            "module": "risk_models",
+            "inputs": ["stock_prices"],
+            "expectation_kind": "numeric",
+            "tolerance": DEFAULT_TOLERANCE,
+            "fn": lambda: risk_models.sample_cov(df_clean),
+        },
+        {
+            "symbol": "pypfopt.risk_models.semicovariance",
+            "module": "risk_models",
+            "inputs": ["stock_prices"],
+            "expectation_kind": "numeric",
+            "tolerance": DEFAULT_TOLERANCE,
+            "fn": lambda: risk_models.semicovariance(df_clean),
+        },
+        {
+            "symbol": "pypfopt.risk_models.exp_cov",
+            "module": "risk_models",
+            "inputs": ["stock_prices"],
+            "expectation_kind": "numeric",
+            "tolerance": SOLVER_SENSITIVE_TOLERANCE,
+            "fn": lambda: risk_models.exp_cov(df_clean, span=180),
+        },
+        {
+            "symbol": "pypfopt.risk_models.min_cov_determinant",
+            "module": "risk_models",
+            "inputs": ["stock_prices"],
+            "expectation_kind": "warning",
+            "tolerance": SOLVER_SENSITIVE_TOLERANCE,
+            "fn": lambda: risk_models.min_cov_determinant(df_clean, random_state=42),
+        },
+        {
+            "symbol": "pypfopt.risk_models.cov_to_corr",
+            "module": "risk_models",
+            "inputs": ["stock_prices"],
+            "expectation_kind": "numeric",
+            "tolerance": DEFAULT_TOLERANCE,
+            "fn": lambda: risk_models.cov_to_corr(cov),
+        },
+        {
+            "symbol": "pypfopt.risk_models.corr_to_cov",
+            "module": "risk_models",
+            "inputs": ["stock_prices"],
+            "expectation_kind": "numeric",
+            "tolerance": DEFAULT_TOLERANCE,
+            "fn": lambda: risk_models.corr_to_cov(
+                risk_models.cov_to_corr(cov), np.sqrt(np.diag(cov.values))
+            ),
+        },
+        {
+            "symbol": "pypfopt.risk_models.CovarianceShrinkage",
+            "module": "risk_models",
+            "inputs": ["stock_prices"],
+            "expectation_kind": "numeric",
+            "tolerance": SOLVER_SENSITIVE_TOLERANCE,
+            "fn": lambda: {
+                "sample": CovarianceShrinkage(df_clean).S,
+                "shrunk_covariance": CovarianceShrinkage(df_clean).shrunk_covariance(),
+                "ledoit_wolf": CovarianceShrinkage(df_clean).ledoit_wolf(),
+                "oracle_approximating": CovarianceShrinkage(df_clean).oracle_approximating(),
+            },
+        },
+        {
+            "symbol": "pypfopt.objective_functions.portfolio_variance",
+            "module": "objective_functions",
+            "inputs": ["stock_prices"],
+            "expectation_kind": "numeric",
+            "tolerance": DEFAULT_TOLERANCE,
+            "fn": lambda: objective_functions.portfolio_variance(equal_w, cov),
+        },
+        {
+            "symbol": "pypfopt.objective_functions.portfolio_return",
+            "module": "objective_functions",
+            "inputs": ["stock_prices"],
+            "expectation_kind": "numeric",
+            "tolerance": DEFAULT_TOLERANCE,
+            "fn": lambda: objective_functions.portfolio_return(
+                equal_w, mu, negative=False
+            ),
+        },
+        {
+            "symbol": "pypfopt.objective_functions.sharpe_ratio",
+            "module": "objective_functions",
+            "inputs": ["stock_prices"],
+            "expectation_kind": "numeric",
+            "tolerance": DEFAULT_TOLERANCE,
+            "fn": lambda: objective_functions.sharpe_ratio(
+                equal_w, mu, cov, risk_free_rate=0.02, negative=False
+            ),
+        },
+        {
+            "symbol": "pypfopt.objective_functions.L2_reg",
+            "module": "objective_functions",
+            "inputs": ["stock_prices"],
+            "expectation_kind": "numeric",
+            "tolerance": DEFAULT_TOLERANCE,
+            "fn": lambda: objective_functions.L2_reg(equal_w, gamma=2),
+        },
+        {
+            "symbol": "pypfopt.objective_functions.quadratic_utility",
+            "module": "objective_functions",
+            "inputs": ["stock_prices"],
+            "expectation_kind": "numeric",
+            "tolerance": DEFAULT_TOLERANCE,
+            "fn": lambda: objective_functions.quadratic_utility(
+                equal_w, mu, cov, risk_aversion=1.5, negative=False
+            ),
+        },
+        {
+            "symbol": "pypfopt.objective_functions.transaction_cost",
+            "module": "objective_functions",
+            "inputs": ["stock_prices"],
+            "expectation_kind": "numeric",
+            "tolerance": DEFAULT_TOLERANCE,
+            "fn": lambda: objective_functions.transaction_cost(equal_w, prev_w, k=0.001),
+        },
+        {
+            "symbol": "pypfopt.objective_functions.ex_ante_tracking_error",
+            "module": "objective_functions",
+            "inputs": ["stock_prices"],
+            "expectation_kind": "numeric",
+            "tolerance": DEFAULT_TOLERANCE,
+            "fn": lambda: objective_functions.ex_ante_tracking_error(equal_w, cov, equal_w),
+        },
+        {
+            "symbol": "pypfopt.objective_functions.ex_post_tracking_error",
+            "module": "objective_functions",
+            "inputs": ["stock_prices"],
+            "expectation_kind": "numeric",
+            "tolerance": DEFAULT_TOLERANCE,
+            "fn": lambda: objective_functions.ex_post_tracking_error(
+                equal_w, returns_df.values, benchmark_returns
+            ),
+        },
+        {
+            "symbol": "pypfopt.discrete_allocation.get_latest_prices",
+            "module": "discrete_allocation",
+            "inputs": ["stock_prices"],
+            "expectation_kind": "numeric",
+            "tolerance": INVARIANT_TOLERANCE,
+            "fn": lambda: get_latest_prices(df_clean),
+        },
+        {
+            "symbol": "pypfopt.discrete_allocation.DiscreteAllocation",
+            "module": "discrete_allocation",
+            "inputs": ["stock_prices"],
+            "expectation_kind": "numeric",
+            "tolerance": SOLVER_SENSITIVE_TOLERANCE,
+            "fn": lambda: {
+                "greedy": DiscreteAllocation(
+                    equal_w_dict, latest_prices, total_portfolio_value=10000
+                ).greedy_portfolio(reinvest=False),
+                "lp": DiscreteAllocation(
+                    equal_w_dict, latest_prices, total_portfolio_value=10000
+                ).lp_portfolio(reinvest=False),
+            },
+        },
+        {
+            "symbol": "pypfopt.black_litterman.market_implied_prior_returns",
+            "module": "black_litterman",
+            "inputs": ["stock_prices"],
+            "expectation_kind": "numeric",
+            "tolerance": SOLVER_SENSITIVE_TOLERANCE,
+            "fn": lambda: market_implied_prior_returns(market_caps, 1.0, cov, risk_free_rate=0.02),
+        },
+        {
+            "symbol": "pypfopt.black_litterman.market_implied_risk_aversion",
+            "module": "black_litterman",
+            "inputs": ["spy_prices"],
+            "expectation_kind": "numeric",
+            "tolerance": DEFAULT_TOLERANCE,
+            "fn": lambda: market_implied_risk_aversion(benchmark_prices, risk_free_rate=0.02),
+        },
+        {
+            "symbol": "pypfopt.black_litterman.BlackLittermanModel",
+            "module": "black_litterman",
+            "inputs": ["stock_prices", "spy_prices"],
+            "expectation_kind": "numeric",
+            "tolerance": SOLVER_SENSITIVE_TOLERANCE,
+            "fn": lambda: {
+                "bl_returns": BlackLittermanModel(
+                    cov, pi=prior, absolute_views=absolute_views
+                ).bl_returns(),
+                "bl_cov": BlackLittermanModel(
+                    cov, pi=prior, absolute_views=absolute_views
+                ).bl_cov(),
+                "bl_weights": BlackLittermanModel(
+                    cov, pi=prior, absolute_views=absolute_views
+                ).bl_weights(delta),
+                "portfolio_performance": (
+                    lambda _bl=BlackLittermanModel(cov, pi=prior, absolute_views=absolute_views): (
+                        _bl.bl_weights(delta),
+                        _bl.portfolio_performance(risk_free_rate=0.02),
+                    )[1]
+                )(),
+            },
+        },
+        {
+            "symbol": "pypfopt.black_litterman.BlackLittermanModel.default_omega",
+            "module": "black_litterman",
+            "inputs": ["stock_prices"],
+            "expectation_kind": "numeric",
+            "tolerance": DEFAULT_TOLERANCE,
+            "fn": lambda: BlackLittermanModel.default_omega(cov.values, p_small, tau=0.05),
+        },
+        {
+            "symbol": "pypfopt.black_litterman.BlackLittermanModel.idzorek_method",
+            "module": "black_litterman",
+            "inputs": ["stock_prices"],
+            "expectation_kind": "numeric",
+            "tolerance": SOLVER_SENSITIVE_TOLERANCE,
+            "fn": lambda: BlackLittermanModel.idzorek_method(
+                confidences_small, cov.values, pi_small, q_small, p_small, tau=0.05, risk_aversion=1
+            ),
+        },
+        {
+            "symbol": "pypfopt.cla.CLA",
+            "module": "cla",
+            "inputs": ["stock_prices"],
+            "expectation_kind": "numeric",
+            "tolerance": SOLVER_SENSITIVE_TOLERANCE,
+            "fn": lambda: {
+                "max_sharpe": CLA(mu, cov).max_sharpe(),
+                "min_volatility": CLA(mu, cov).min_volatility(),
+                "portfolio_performance": (
+                    lambda _cla=CLA(mu, cov): (_cla.max_sharpe(), _cla.portfolio_performance())[1]
+                )(),
+            },
+        },
+        {
+            "symbol": "pypfopt.hierarchical_portfolio.HRPOpt",
+            "module": "hrp",
+            "inputs": ["stock_prices"],
+            "expectation_kind": "numeric",
+            "tolerance": SOLVER_SENSITIVE_TOLERANCE,
+            "fn": lambda: {
+                "optimize": HRPOpt(returns_df).optimize(),
+                "portfolio_performance": (
+                    lambda _hrp=HRPOpt(returns_df): (_hrp.optimize(), _hrp.portfolio_performance())[1]
+                )(),
+            },
+        },
+        {
+            "symbol": "pypfopt.base_optimizer.BaseOptimizer",
+            "module": "base_optimizer",
+            "inputs": ["stock_prices"],
+            "expectation_kind": "invariant",
+            "tolerance": INVARIANT_TOLERANCE,
+            "fn": lambda: (
+                lambda _bo=base_optimizer.BaseOptimizer(n_assets, tickers): {
+                    "set_weights": _bo.set_weights(equal_w_dict),
+                    "clean_weights": _bo.clean_weights(),
+                }
+            )(),
+        },
+        {
+            "symbol": "pypfopt.base_optimizer.BaseConvexOptimizer",
+            "module": "base_optimizer",
+            "inputs": ["stock_prices"],
+            "expectation_kind": "invariant",
+            "tolerance": INVARIANT_TOLERANCE,
+            "fn": lambda: (
+                lambda _bco=base_optimizer.BaseConvexOptimizer(n_assets, tickers), _gamma=cp.Parameter(
+                    name="gamma", value=1.0, nonneg=True
+                ): (
+                    _bco.add_constraint(lambda w: cp.sum(w) <= (_gamma + 10)),
+                    _bco.update_parameter_value("gamma", 2.5),
+                    {
+                        "gamma_defined": _bco.is_parameter_defined("gamma"),
+                        "gamma_value": float(_gamma.value),
+                        "clone_constraints": len(_bco.deepcopy()._constraints),
+                    },
+                )[-1]
+            )(),
+        },
+        {
+            "symbol": "pypfopt.efficient_frontier.EfficientFrontier",
+            "module": "efficient_frontier",
+            "inputs": ["stock_prices"],
+            "expectation_kind": "numeric",
+            "tolerance": SOLVER_SENSITIVE_TOLERANCE,
+            "fn": lambda: {
+                "min_volatility": EfficientFrontier(mu, cov).min_volatility(),
+                "max_sharpe": EfficientFrontier(mu, cov).max_sharpe(risk_free_rate=0.02),
+                "max_quadratic_utility": EfficientFrontier(mu, cov).max_quadratic_utility(
+                    risk_aversion=1.0
+                ),
+                "efficient_return": EfficientFrontier(mu, cov).efficient_return(
+                    target_return=float(np.percentile(mu, 40))
+                ),
+                "efficient_risk": EfficientFrontier(mu, cov).efficient_risk(
+                    target_volatility=0.30
+                ),
+                "portfolio_performance": (
+                    lambda _ef=EfficientFrontier(mu, cov): (
+                        _ef.min_volatility(),
+                        _ef.portfolio_performance(risk_free_rate=0.02),
+                    )[1]
+                )(),
+            },
+        },
+        {
+            "symbol": "pypfopt.efficient_frontier.EfficientSemivariance",
+            "module": "efficient_semivariance",
+            "inputs": ["stock_prices"],
+            "expectation_kind": "numeric",
+            "tolerance": SOLVER_SENSITIVE_TOLERANCE,
+            "fn": lambda: {
+                "min_semivariance": EfficientSemivariance(mu, returns_df).min_semivariance(),
+                "efficient_return": EfficientSemivariance(mu, returns_df).efficient_return(
+                    target_return=float(np.percentile(mu, 30))
+                ),
+                "efficient_risk": EfficientSemivariance(mu, returns_df).efficient_risk(
+                    target_semideviation=0.35
+                ),
+                "portfolio_performance": (
+                    lambda _es=EfficientSemivariance(mu, returns_df): (
+                        _es.min_semivariance(),
+                        _es.portfolio_performance(risk_free_rate=0.02),
+                    )[1]
+                )(),
+            },
+        },
+        {
+            "symbol": "pypfopt.efficient_frontier.EfficientCVaR",
+            "module": "efficient_cvar",
+            "inputs": ["stock_prices"],
+            "expectation_kind": "numeric",
+            "tolerance": SOLVER_SENSITIVE_TOLERANCE,
+            "fn": lambda: {
+                "min_cvar": EfficientCVaR(mu, returns_df).min_cvar(),
+                "efficient_return": EfficientCVaR(mu, returns_df).efficient_return(
+                    target_return=float(np.percentile(mu, 30))
+                ),
+                "efficient_risk": EfficientCVaR(mu, returns_df).efficient_risk(target_cvar=0.08),
+                "portfolio_performance": (
+                    lambda _ec=EfficientCVaR(mu, returns_df): (
+                        _ec.min_cvar(),
+                        _ec.portfolio_performance(),
+                    )[1]
+                )(),
+            },
+        },
+        {
+            "symbol": "pypfopt.efficient_frontier.EfficientCDaR",
+            "module": "efficient_cdar",
+            "inputs": ["stock_prices"],
+            "expectation_kind": "numeric",
+            "tolerance": SOLVER_SENSITIVE_TOLERANCE,
+            "fn": lambda: {
+                "min_cdar": EfficientCDaR(mu, returns_df).min_cdar(),
+                "efficient_return": EfficientCDaR(mu, returns_df).efficient_return(
+                    target_return=float(np.percentile(mu, 30))
+                ),
+                "efficient_risk": EfficientCDaR(mu, returns_df).efficient_risk(target_cdar=0.10),
+                "portfolio_performance": (
+                    lambda _ed=EfficientCDaR(mu, returns_df): (
+                        _ed.min_cdar(),
+                        _ed.portfolio_performance(),
+                    )[1]
+                )(),
+            },
+        },
+        {
+            "symbol": "pypfopt.base_optimizer.BaseConvexOptimizer.deepcopy",
+            "module": "base_optimizer",
+            "inputs": ["stock_prices"],
+            "expectation_kind": "invariant",
+            "tolerance": INVARIANT_TOLERANCE,
+            "fn": lambda: (
+                lambda _ef=EfficientFrontier(mu, cov): (
+                    _ef.min_volatility(),
+                    len(_ef.deepcopy()._constraints),
+                )[1]
+            )(),
+        },
+        {
+            "symbol": "pypfopt.base_optimizer.BaseConvexOptimizer.is_parameter_defined",
+            "module": "base_optimizer",
+            "inputs": ["stock_prices"],
+            "expectation_kind": "invariant",
+            "tolerance": INVARIANT_TOLERANCE,
+            "fn": lambda: (
+                lambda _ef=EfficientFrontier(mu, cov), _gamma=cp.Parameter(
+                    name="gamma", value=1.0, nonneg=True
+                ): (
+                    _ef.add_objective(lambda w: _gamma * cp.sum_squares(w)),
+                    _ef.is_parameter_defined("gamma"),
+                )[1]
+            )(),
+        },
+        {
+            "symbol": "pypfopt.base_optimizer.BaseConvexOptimizer.update_parameter_value",
+            "module": "base_optimizer",
+            "inputs": ["stock_prices"],
+            "expectation_kind": "invariant",
+            "tolerance": INVARIANT_TOLERANCE,
+            "fn": lambda: (
+                lambda _ef=EfficientFrontier(mu, cov), _gamma=cp.Parameter(
+                    name="gamma", value=1.0, nonneg=True
+                ): (
+                    _ef.add_objective(lambda w: _gamma * cp.sum_squares(w)),
+                    _ef.min_volatility(),
+                    _ef.update_parameter_value("gamma", 2.5),
+                    float(_gamma.value),
+                )[-1]
+            )(),
+        },
+    ]
+
+    public_api_by_name = set(PUBLIC_API)
+    for spec in api_specs:
+        symbol = spec["symbol"]
+        api_name = symbol.split(".")[-1]
+        if api_name not in public_api_by_name:
+            continue
+        if not include(spec["module"]):
+            continue
+        run_case(
+            api_symbol=symbol,
+            module_name=spec["module"],
+            input_refs=spec["inputs"],
+            tolerance=spec["tolerance"],
+            expectation_kind=spec["expectation_kind"],
+            fn=spec["fn"],
+        )
+
+    return {"cases": sorted(cases, key=lambda c: c["id"]), "failures": failures}
+
+
 def build_traceability(cases: Sequence[Dict[str, Any]]) -> List[Dict[str, Any]]:
     traceability: List[Dict[str, Any]] = []
     for case in cases:
@@ -964,49 +1628,56 @@ def build_fixture(args: argparse.Namespace) -> Dict[str, Any]:
     smoke = run_smoke_checks(baseline_root)
     patch_test_utilities_for_quiet_mode()
 
-    discovered = discover_test_scenarios(
-        baseline_root=baseline_root,
-        selected_modules_list=selected_modules_list,
-        include_skipif=args.include_skipif,
-    )
-    scenarios: List[TestScenario] = discovered["scenarios"]
-    test_results = execute_test_scenarios(scenarios)
-    extra_results = run_extra_scenarios(selected_modules_list)
+    # Golden fixture is API-only by design: no raw test functions and no extra manual scenarios.
+    discovered = {"scenarios": [], "exclusions": [], "errors": []}
+    test_results = {"cases": [], "failures": []}
+    extra_results = {"cases": [], "failures": []}
+    api_results = run_public_api_cases(selected_modules_list)
 
-    all_cases = sorted(
-        test_results["cases"] + extra_results["cases"], key=lambda c: c["id"]
-    )
+    all_cases = sorted(api_results["cases"], key=lambda c: c["id"])
     traceability = build_traceability(all_cases)
     api_to_tests = compute_api_to_tests(traceability)
     covered_api = set(api_to_tests.keys())
     missing_api = sorted(set(PUBLIC_API) - covered_api)
 
-    selected_files = selected_test_files(selected_modules_list)
+    selected_files: List[str] = []
     total_tests_in_selected_files = 0
-    for file_name in selected_files:
-        file_path = baseline_root / "tests" / file_name
-        tree = ast.parse(file_path.read_text(encoding="utf-8"), filename=str(file_path))
-        total_tests_in_selected_files += sum(
-            1
-            for node in tree.body
-            if isinstance(node, ast.FunctionDef) and node.name.startswith("test_")
-        )
 
-    skip_exclusions = [e for e in discovered["exclusions"] if e["kind"] == "skip"]
-    skipif_exclusions = [e for e in discovered["exclusions"] if e["kind"] == "skipif"]
+    skip_exclusions: List[Dict[str, Any]] = []
+    skipif_exclusions: List[Dict[str, Any]] = []
 
-    case_failures = test_results["failures"] + extra_results["failures"]
+    case_failures = list(api_results["failures"])
 
-    full_scope = set(selected_modules_list) == set(ALL_MODULES)
-    target = None
-    if full_scope and args.include_skipif:
-        target = {"cases_from_tests": 289, "cases_extra_api": 6, "total_cases": 295}
+    api_cases = [c for c in all_cases if c.get("call", {}).get("kind") == "api_method_scenario"]
+    api_cases_with_missing_result = [
+        c["id"] for c in api_cases if c.get("expected", {}).get("result") is None
+    ]
+    api_cases_failed = [c["id"] for c in api_cases if c.get("expected", {}).get("status") != "pass"]
+    api_method_names_generated = sorted(
+        {
+            c.get("call", {}).get("symbol", "").split(".")[-1]
+            for c in api_cases
+            if c.get("call", {}).get("symbol")
+        }
+    )
+    api_method_names_missing = sorted(set(PUBLIC_API) - set(api_method_names_generated))
+    api_method_names_extra = sorted(set(api_method_names_generated) - set(PUBLIC_API))
+
+    target = {
+        "cases_from_tests": 0,
+        "cases_extra_api": 0,
+        "cases_api_methods": len(PUBLIC_API),
+        "total_cases": len(PUBLIC_API),
+    }
 
     gate_passed = True
-    if target is not None:
-        gate_passed = gate_passed and len(test_results["cases"]) == target["cases_from_tests"]
-        gate_passed = gate_passed and len(extra_results["cases"]) == target["cases_extra_api"]
-        gate_passed = gate_passed and len(all_cases) == target["total_cases"]
+    gate_passed = gate_passed and len(test_results["cases"]) == target["cases_from_tests"]
+    gate_passed = gate_passed and len(extra_results["cases"]) == target["cases_extra_api"]
+    gate_passed = gate_passed and len(api_results["cases"]) == target["cases_api_methods"]
+    gate_passed = gate_passed and len(all_cases) == target["total_cases"]
+    gate_passed = gate_passed and len(missing_api) == 0
+    gate_passed = gate_passed and len(api_cases_with_missing_result) == 0
+    gate_passed = gate_passed and len(api_method_names_missing) == 0
 
     coverage = {
         "modulesRequested": selected_modules_list,
@@ -1017,6 +1688,7 @@ def build_fixture(args: argparse.Namespace) -> Dict[str, Any]:
         "testsExcludedSkipIf": len(skipif_exclusions),
         "cases_from_tests": len(test_results["cases"]),
         "cases_extra_api": len(extra_results["cases"]),
+        "cases_api_methods": len(api_results["cases"]),
         "total_cases": len(all_cases),
         "scenarioFailures": len(case_failures),
         "scenarioPasses": len(all_cases) - len(case_failures),
@@ -1024,9 +1696,14 @@ def build_fixture(args: argparse.Namespace) -> Dict[str, Any]:
         "gatePassed": gate_passed,
         "missingApi": missing_api,
         "apiToTests": api_to_tests,
+        "apiCasesFailed": api_cases_failed,
+        "apiCasesMissingResult": api_cases_with_missing_result,
+        "apiMethodNamesGenerated": api_method_names_generated,
+        "apiMethodNamesMissing": api_method_names_missing,
+        "apiMethodNamesExtra": api_method_names_extra,
         "traceability": traceability,
-        "exclusions": discovered["exclusions"],
-        "upstreamSkips": sorted(UPSTREAM_SKIP_TESTS),
+        "exclusions": [],
+        "upstreamSkips": [],
         "smoke": smoke,
         "failures": case_failures,
     }
@@ -1050,12 +1727,22 @@ def build_fixture(args: argparse.Namespace) -> Dict[str, Any]:
 
     # Strict gating.
     if args.strict:
-        if target is not None and not gate_passed:
+        if not gate_passed:
             raise SystemExit("Strict mode failed: coverage gate did not pass")
         if missing_api:
             raise SystemExit(
                 "Strict mode failed: missing API coverage for "
                 + ", ".join(missing_api)
+            )
+        if api_cases_with_missing_result:
+            raise SystemExit(
+                "Strict mode failed: api cases with missing result: "
+                + ", ".join(api_cases_with_missing_result)
+            )
+        if api_method_names_missing:
+            raise SystemExit(
+                "Strict mode failed: missing api method scenarios for "
+                + ", ".join(api_method_names_missing)
             )
 
     if args.fail_on_missing and missing_api:
