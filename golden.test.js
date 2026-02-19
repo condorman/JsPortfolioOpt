@@ -454,26 +454,37 @@ function buildApiScenarioExecutors(ctx) {
       }).lpPortfolio({ reinvest: false }),
     }),
 
-    'pypfopt.black_litterman.market_implied_prior_returns': () =>
+    'pypfopt.black_litterman.market_implied_prior_returns': (params = {}) =>
       seriesOf(
         marketImpliedPriorReturns(ctx.marketCaps, 1.0, ctx.covMatrix, {
-          riskFreeRate: 0.02,
+          riskFreeRate: params.risk_free_rate ?? 0.02,
           tickers: ctx.tickers,
         }),
         ctx.tickers,
         null,
       ),
 
-    'pypfopt.black_litterman.market_implied_risk_aversion': () =>
-      marketImpliedRiskAversion(ctx.spyFullPrices, { riskFreeRate: 0.02 }),
+    'pypfopt.black_litterman.market_implied_risk_aversion': (params = {}) =>
+      marketImpliedRiskAversion(ctx.spyFullPrices, { riskFreeRate: params.risk_free_rate ?? 0.02 }),
 
-    'pypfopt.black_litterman.BlackLittermanModel': () => {
+    'pypfopt.black_litterman.BlackLittermanModel': (params = {}) => {
+      const tau = params.tau ?? 0.05
+      const riskFreeRate = params.risk_free_rate ?? 0.02
+      const modelOptions = {
+        pi: ctx.prior,
+        absoluteViews: ctx.absoluteViews,
+        tickers: ctx.tickers,
+        tau,
+      }
+      if (params.omega != null) {
+        modelOptions.omega = params.omega
+      }
+      if (Array.isArray(params.view_confidences)) {
+        modelOptions.viewConfidences = params.view_confidences
+      }
+
       const makeModel = () =>
-        new BlackLittermanModel(ctx.covMatrix, {
-          pi: ctx.prior,
-          absoluteViews: ctx.absoluteViews,
-          tickers: ctx.tickers,
-        })
+        new BlackLittermanModel(ctx.covMatrix, modelOptions)
 
       const blReturnsObj = makeModel().blReturns()
 
@@ -488,22 +499,22 @@ function buildApiScenarioExecutors(ctx) {
         portfolio_performance: (() => {
           const bl = makeModel()
           bl.blWeights(ctx.delta)
-          return bl.portfolioPerformance({ riskFreeRate: 0.02 })
+          return bl.portfolioPerformance({ riskFreeRate })
         })(),
       }
     },
 
-    'pypfopt.black_litterman.BlackLittermanModel.default_omega': () =>
-      BlackLittermanModel.defaultOmega(ctx.covMatrix, ctx.pSmall, 0.05),
+    'pypfopt.black_litterman.BlackLittermanModel.default_omega': (params = {}) =>
+      BlackLittermanModel.defaultOmega(ctx.covMatrix, ctx.pSmall, params.tau ?? 0.05),
 
-    'pypfopt.black_litterman.BlackLittermanModel.idzorek_method': () =>
+    'pypfopt.black_litterman.BlackLittermanModel.idzorek_method': (params = {}) =>
       BlackLittermanModel.idzorekMethod(
-        ctx.confidencesSmall,
+        params.view_confidences ?? ctx.confidencesSmall,
         ctx.covMatrix,
         ctx.piSmall,
         ctx.qSmall,
         ctx.pSmall,
-        0.05,
+        params.tau ?? 0.05,
       ),
 
     'pypfopt.cla.CLA': () => ({
@@ -679,7 +690,7 @@ describe('golden parity (per-api)', () => {
 
       if (knownGap) {
         try {
-          const actual = executor()
+          const actual = executor(testCase.params ?? {})
           compareScenarioWithGolden(testCase, actual)
         } catch {
           return
@@ -687,7 +698,7 @@ describe('golden parity (per-api)', () => {
         return
       }
 
-      const actual = executor()
+      const actual = executor(testCase.params ?? {})
       compareScenarioWithGolden(testCase, actual)
     })
   }

@@ -87,6 +87,8 @@ class ApiSpec:
     datasets: Sequence[str]
     tolerance: Dict[str, float]
     fn: Callable[[], Any]
+    case_id: str | None = None
+    params: Dict[str, Any] | None = None
 
 
 def parse_args() -> argparse.Namespace:
@@ -352,6 +354,38 @@ def build_api_specs(selected_modules: Sequence[str]) -> List[ApiSpec]:
     q_small = np.array([[0.04], [0.03], [0.02]])
     pi_small = np.zeros((cov.shape[0], 1))
     confidences_small = np.array([0.6, 0.7, 0.8])
+    bl_view_confidences = np.array([0.55, 0.70, 0.90])
+
+    def black_litterman_payload(
+        *,
+        tau: float,
+        risk_free_rate: float,
+        omega: str | None = None,
+        view_confidences: Sequence[float] | None = None,
+    ) -> Dict[str, Any]:
+        kwargs: Dict[str, Any] = {
+            "pi": prior,
+            "absolute_views": absolute_views,
+            "tau": tau,
+        }
+        if omega is not None:
+            kwargs["omega"] = omega
+        if view_confidences is not None:
+            kwargs["view_confidences"] = np.array(view_confidences, dtype=float)
+
+        make_model = lambda: BlackLittermanModel(cov, **kwargs)
+        bl_returns = make_model().bl_returns()
+        bl_cov = make_model().bl_cov()
+        bl_weights = make_model().bl_weights(delta)
+        perf_model = make_model()
+        perf_model.bl_weights(delta)
+        perf = perf_model.portfolio_performance(risk_free_rate=risk_free_rate)
+        return {
+            "bl_returns": bl_returns,
+            "bl_cov": bl_cov,
+            "bl_weights": bl_weights,
+            "portfolio_performance": perf,
+        }
 
     specs = [
         ApiSpec(
@@ -504,20 +538,47 @@ def build_api_specs(selected_modules: Sequence[str]) -> List[ApiSpec]:
             module="black_litterman",
             datasets=["stock_prices", "spy_prices"],
             tolerance=SOLVER_SENSITIVE_TOLERANCE,
-            fn=lambda: {
-                "bl_returns": BlackLittermanModel(
-                    cov, pi=prior, absolute_views=absolute_views
-                ).bl_returns(),
-                "bl_cov": BlackLittermanModel(cov, pi=prior, absolute_views=absolute_views).bl_cov(),
-                "bl_weights": BlackLittermanModel(
-                    cov, pi=prior, absolute_views=absolute_views
-                ).bl_weights(delta),
-                "portfolio_performance": (
-                    lambda bl=BlackLittermanModel(cov, pi=prior, absolute_views=absolute_views): (
-                        bl.bl_weights(delta),
-                        bl.portfolio_performance(risk_free_rate=0.02),
-                    )[1]
-                )(),
+            fn=lambda: black_litterman_payload(tau=0.05, risk_free_rate=0.02),
+            params={"tau": 0.05, "risk_free_rate": 0.02},
+        ),
+        ApiSpec(
+            api="BlackLittermanModel",
+            symbol="pypfopt.black_litterman.BlackLittermanModel",
+            module="black_litterman",
+            datasets=["stock_prices", "spy_prices"],
+            tolerance=SOLVER_SENSITIVE_TOLERANCE,
+            fn=lambda: black_litterman_payload(tau=0.01, risk_free_rate=0.0),
+            case_id="api::pypfopt.black_litterman.BlackLittermanModel::tau_0_01_rfr_0_00",
+            params={"tau": 0.01, "risk_free_rate": 0.0},
+        ),
+        ApiSpec(
+            api="BlackLittermanModel",
+            symbol="pypfopt.black_litterman.BlackLittermanModel",
+            module="black_litterman",
+            datasets=["stock_prices", "spy_prices"],
+            tolerance=SOLVER_SENSITIVE_TOLERANCE,
+            fn=lambda: black_litterman_payload(tau=0.10, risk_free_rate=0.01),
+            case_id="api::pypfopt.black_litterman.BlackLittermanModel::tau_0_10_rfr_0_01",
+            params={"tau": 0.1, "risk_free_rate": 0.01},
+        ),
+        ApiSpec(
+            api="BlackLittermanModel",
+            symbol="pypfopt.black_litterman.BlackLittermanModel",
+            module="black_litterman",
+            datasets=["stock_prices", "spy_prices"],
+            tolerance=SOLVER_SENSITIVE_TOLERANCE,
+            fn=lambda: black_litterman_payload(
+                tau=0.05,
+                risk_free_rate=0.02,
+                omega="idzorek",
+                view_confidences=bl_view_confidences,
+            ),
+            case_id="api::pypfopt.black_litterman.BlackLittermanModel::omega_idzorek_conf_tau_0_05_rfr_0_02",
+            params={
+                "tau": 0.05,
+                "risk_free_rate": 0.02,
+                "omega": "idzorek",
+                "view_confidences": [0.55, 0.7, 0.9],
             },
         ),
         ApiSpec(
@@ -527,6 +588,27 @@ def build_api_specs(selected_modules: Sequence[str]) -> List[ApiSpec]:
             datasets=["stock_prices"],
             tolerance=SOLVER_SENSITIVE_TOLERANCE,
             fn=lambda: market_implied_prior_returns(market_caps, 1.0, cov, risk_free_rate=0.02),
+            params={"risk_free_rate": 0.02},
+        ),
+        ApiSpec(
+            api="market_implied_prior_returns",
+            symbol="pypfopt.black_litterman.market_implied_prior_returns",
+            module="black_litterman",
+            datasets=["stock_prices"],
+            tolerance=SOLVER_SENSITIVE_TOLERANCE,
+            fn=lambda: market_implied_prior_returns(market_caps, 1.0, cov, risk_free_rate=0.0),
+            case_id="api::pypfopt.black_litterman.market_implied_prior_returns::rfr_0_00",
+            params={"risk_free_rate": 0.0},
+        ),
+        ApiSpec(
+            api="market_implied_prior_returns",
+            symbol="pypfopt.black_litterman.market_implied_prior_returns",
+            module="black_litterman",
+            datasets=["stock_prices"],
+            tolerance=SOLVER_SENSITIVE_TOLERANCE,
+            fn=lambda: market_implied_prior_returns(market_caps, 1.0, cov, risk_free_rate=0.01),
+            case_id="api::pypfopt.black_litterman.market_implied_prior_returns::rfr_0_01",
+            params={"risk_free_rate": 0.01},
         ),
         ApiSpec(
             api="market_implied_risk_aversion",
@@ -535,6 +617,27 @@ def build_api_specs(selected_modules: Sequence[str]) -> List[ApiSpec]:
             datasets=["spy_prices"],
             tolerance=DEFAULT_TOLERANCE,
             fn=lambda: market_implied_risk_aversion(benchmark_prices, risk_free_rate=0.02),
+            params={"risk_free_rate": 0.02},
+        ),
+        ApiSpec(
+            api="market_implied_risk_aversion",
+            symbol="pypfopt.black_litterman.market_implied_risk_aversion",
+            module="black_litterman",
+            datasets=["spy_prices"],
+            tolerance=DEFAULT_TOLERANCE,
+            fn=lambda: market_implied_risk_aversion(benchmark_prices, risk_free_rate=0.0),
+            case_id="api::pypfopt.black_litterman.market_implied_risk_aversion::rfr_0_00",
+            params={"risk_free_rate": 0.0},
+        ),
+        ApiSpec(
+            api="market_implied_risk_aversion",
+            symbol="pypfopt.black_litterman.market_implied_risk_aversion",
+            module="black_litterman",
+            datasets=["spy_prices"],
+            tolerance=DEFAULT_TOLERANCE,
+            fn=lambda: market_implied_risk_aversion(benchmark_prices, risk_free_rate=0.01),
+            case_id="api::pypfopt.black_litterman.market_implied_risk_aversion::rfr_0_01",
+            params={"risk_free_rate": 0.01},
         ),
         ApiSpec(
             api="CLA",
@@ -721,6 +824,7 @@ def build_fixture(args: argparse.Namespace) -> Dict[str, Any]:
 
     tests: List[Dict[str, Any]] = []
     generated_api_names: List[str] = []
+    seen_ids: set[str] = set()
 
     for spec in build_api_specs(selected_modules):
         try:
@@ -731,16 +835,22 @@ def build_fixture(args: argparse.Namespace) -> Dict[str, Any]:
                 f"{type(exc).__name__}: {exc}"
             ) from exc
 
-        tests.append(
-            {
-                "id": f"api::{spec.symbol}",
-                "api": spec.api,
-                "symbol": spec.symbol,
-                "datasets": list(spec.datasets),
-                "tolerance": dict(spec.tolerance),
-                "expected": expected,
-            }
-        )
+        case_id = spec.case_id or f"api::{spec.symbol}"
+        if case_id in seen_ids:
+            raise SystemExit(f"Duplicate test id generated: {case_id}")
+        seen_ids.add(case_id)
+
+        test_case = {
+            "id": case_id,
+            "api": spec.api,
+            "symbol": spec.symbol,
+            "datasets": list(spec.datasets),
+            "tolerance": dict(spec.tolerance),
+            "expected": expected,
+        }
+        if spec.params is not None:
+            test_case["params"] = canonicalize(spec.params)
+        tests.append(test_case)
         generated_api_names.append(spec.api)
 
     tests = sorted(tests, key=lambda item: item["id"])
