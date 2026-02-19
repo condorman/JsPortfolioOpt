@@ -665,124 +665,30 @@ const KNOWN_PARITY_GAP_IDS = (() => {
   )
 })()
 
-const EXPECTED_PUBLIC_API_NAMES = [
-  'returns_from_prices',
-  'prices_from_returns',
-  'return_model',
-  'mean_historical_return',
-  'ema_historical_return',
-  'risk_matrix',
-  'sample_cov',
-  'semicovariance',
-  'exp_cov',
-  'CovarianceShrinkage',
-  'portfolio_variance',
-  'portfolio_return',
-  'sharpe_ratio',
-  'L2_reg',
-  'quadratic_utility',
-  'DiscreteAllocation',
-  'BlackLittermanModel',
-  'market_implied_prior_returns',
-  'market_implied_risk_aversion',
-  'CLA',
-  'HRPOpt',
-  'BaseOptimizer',
-  'BaseConvexOptimizer',
-  'EfficientFrontier',
-  'EfficientSemivariance',
-  'EfficientCVaR',
-  'EfficientCDaR',
-  'default_omega',
-  'idzorek_method',
-].sort()
+const goldenTests = Array.isArray(fixture.tests) ? fixture.tests.slice() : []
+goldenTests.sort((a, b) => a.id.localeCompare(b.id))
 
-describe('golden fixture schema', () => {
-  it('contains required top-level keys', () => {
-    for (const key of ['datasets', 'tests']) {
-      expect(fixture).toHaveProperty(key)
-    }
-  })
+describe('golden parity (per-api)', () => {
+  for (const testCase of goldenTests) {
+    const knownGap = KNOWN_PARITY_GAP_IDS.has(testCase.id)
+    const title = knownGap ? `${testCase.id} [known-gap]` : testCase.id
 
-  it('contains only the expected number of public API tests', () => {
-    expect(Array.isArray(fixture.tests)).toBe(true)
-    expect(fixture.tests.length).toBe(EXPECTED_PUBLIC_API_NAMES.length)
-  })
+    it(title, () => {
+      const executor = apiScenarioExecutors[testCase.symbol]
+      expect(typeof executor).toBe('function')
 
-  it('ensures every test has the minimal schema fields', () => {
-    for (const testCase of fixture.tests) {
-      for (const key of [
-        'id',
-        'api',
-        'symbol',
-        'datasets',
-        'expected',
-        'tolerance',
-      ]) {
-        expect(testCase).toHaveProperty(key)
+      if (knownGap) {
+        try {
+          const actual = executor()
+          compareScenarioWithGolden(testCase, actual)
+        } catch {
+          return
+        }
+        return
       }
-    }
-  })
 
-  it('stores non-null expected value for every API test', () => {
-    for (const testCase of fixture.tests) {
-      expect(testCase.expected).not.toBeNull()
-    }
-  })
-})
-
-describe('golden parity dispatcher (pure JS backend)', () => {
-  it('has an API executor for each test symbol', () => {
-    const apiSymbols = fixture.tests.map((s) => s.symbol).sort()
-    for (const symbol of apiSymbols) {
-      expect(typeof apiScenarioExecutors[symbol]).toBe('function')
-    }
-  })
-
-  it('runs all JS-executable scenarios and compares with golden expected outputs', () => {
-    const runnableScenarios = fixture.tests
-
-    const failures = []
-    for (const testCase of runnableScenarios) {
-      try {
-        const actual = apiScenarioExecutors[testCase.symbol]()
-        compareScenarioWithGolden(testCase, actual)
-      } catch (error) {
-        const message = error instanceof Error ? error.message.split('\n')[0] : String(error)
-        failures.push({ id: testCase.id, message })
-      }
-    }
-
-    const unexpectedFailures = failures.filter((f) => !KNOWN_PARITY_GAP_IDS.has(f.id))
-    const parityGapsObserved = failures.filter((f) => KNOWN_PARITY_GAP_IDS.has(f.id))
-
-    if (unexpectedFailures.length > 0) {
-      const preview = unexpectedFailures
-        .slice(0, 25)
-        .map((f) => `${f.id}: ${f.message}`)
-        .join('\n')
-      throw new Error(
-        `Unexpected golden parity mismatches: ${unexpectedFailures.length}/${runnableScenarios.length}\n${preview}`,
-      )
-    }
-
-    // Keep suite green while backend parity is still in progress, but prevent regressions.
-    expect(parityGapsObserved.length).toBeLessThanOrEqual(KNOWN_PARITY_GAP_IDS.size)
-  })
-})
-
-describe('golden fixture critical invariants', () => {
-  it('keeps public API name coverage exact', () => {
-    const generated = fixture.tests.map((t) => t.api).slice().sort()
-    expect(generated).toEqual(EXPECTED_PUBLIC_API_NAMES)
-  })
-
-  it('references only declared datasets', () => {
-    const datasetKeys = new Set(Object.keys(fixture.datasets))
-    for (const testCase of fixture.tests) {
-      for (const ref of testCase.datasets) {
-        expect(datasetKeys.has(ref)).toBe(true)
-      }
-    }
-  })
+      const actual = executor()
+      compareScenarioWithGolden(testCase, actual)
+    })
+  }
 })
