@@ -107,6 +107,62 @@ function weightedCovariance(x, y, span) {
   return cov
 }
 
+function median(values) {
+  const sorted = values.slice().sort((a, b) => a - b)
+  const mid = Math.floor(sorted.length / 2)
+  if (sorted.length % 2 === 0) {
+    return (sorted[mid - 1] + sorted[mid]) / 2
+  }
+  return sorted[mid]
+}
+
+function mad(values, center) {
+  const deviations = values.map((value) => Math.abs(value - center))
+  return median(deviations)
+}
+
+function robustSubset(returns, supportFraction = null) {
+  const nObs = returns.length
+  const nAssets = returns[0].length
+  if (nObs <= nAssets + 1) {
+    return returns
+  }
+
+  const minSupport = nAssets + 1
+  let h
+  if (supportFraction == null) {
+    h = Math.floor((nObs + nAssets + 1) / 2)
+  } else {
+    if (
+      typeof supportFraction !== 'number' ||
+      !Number.isFinite(supportFraction) ||
+      supportFraction <= 0 ||
+      supportFraction > 1
+    ) {
+      throw new Error('supportFraction must be in (0, 1]')
+    }
+    h = Math.floor(supportFraction * nObs)
+  }
+  h = Math.max(minSupport, Math.min(nObs, h))
+
+  const medians = Array.from({ length: nAssets }, (_, colIndex) => median(column(returns, colIndex)))
+  const scales = Array.from({ length: nAssets }, (_, colIndex) => {
+    const s = mad(column(returns, colIndex), medians[colIndex])
+    return s > 1e-12 ? s : 1
+  })
+
+  const scored = returns.map((row, rowIndex) => {
+    let score = 0
+    for (let colIndex = 0; colIndex < nAssets; colIndex += 1) {
+      const z = (row[colIndex] - medians[colIndex]) / scales[colIndex]
+      score += z * z
+    }
+    return { row, rowIndex, score }
+  })
+  scored.sort((a, b) => (a.score === b.score ? a.rowIndex - b.rowIndex : a.score - b.score))
+  return scored.slice(0, h).map((item) => item.row)
+}
+
 export function expCov(
   prices,
   {
@@ -133,8 +189,21 @@ export function expCov(
   return fixNonpositiveSemidefinite(out, { fixMethod })
 }
 
-export function minCovDeterminant() {
-  throw new Error('min_cov_determinant is not implemented yet in JS')
+export function minCovDeterminant(
+  prices,
+  {
+    returnsData = false,
+    frequency = 252,
+    logReturns = false,
+    fixMethod = 'spectral',
+    supportFraction = null,
+  } = {},
+) {
+  const returns = returnsData ? prices : returnsFromPrices(prices, { logReturns })
+  validateMatrix('returns', returns)
+  const subset = robustSubset(returns, supportFraction)
+  const cov = computeCovarianceMatrix(subset, frequency)
+  return fixNonpositiveSemidefinite(cov, { fixMethod })
 }
 
 export function covToCorr(covMatrix) {

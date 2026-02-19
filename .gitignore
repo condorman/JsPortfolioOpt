@@ -1,6 +1,5 @@
 # Envs
-env_*/
-.venv_golden/
+.venv_*
 
 # Node.js
 node_modules/

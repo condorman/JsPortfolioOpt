@@ -12,11 +12,14 @@ Reference docs: https://pyportfolioopt.readthedocs.io/en/latest/index.html
 ## Python Setup (Golden Generation)
 
 ```bash
-python3.13 -m venv env_3.13
-source env_3.13/bin/activate
+python3 -m venv .venv_golden
+source .venv_golden/bin/activate
 pip install -U pip
 pip install -r requirements.in
 ```
+
+Recommended runtime for golden fidelity: Python `3.9` to `3.12`.
+With Python `3.13` + newest numerical stack, some upstream tests may fail due compatibility changes.
 
 Recommended dedicated env for golden:
 
@@ -25,6 +28,16 @@ Recommended dedicated env for golden:
 ```
 
 Generate the full golden fixture with strict gates:
+
+```bash
+PYTHONPATH=references/PyPortfolioOpt-main \
+  .venv_golden/bin/python generate_golden.py \
+  --include-skipif \
+  --strict \
+  --fail-on-missing
+```
+
+Quick accuracy check (coverage gate + deterministic rebuild):
 
 ```bash
 PYTHONPATH=references/PyPortfolioOpt-main \
@@ -69,4 +82,5 @@ npm test
 - `src/discrete_allocation.js`
 - `src/index.js`
 
-Note: optimizer backend methods are scaffolded and intentionally throw until solver parity is implemented end-to-end.
+Note: the pure-JS backend is now partially implemented for core optimizers and utilities.
+Exact solver parity with PyPortfolioOpt (especially CLA/convex edge-cases) is still in progress.
