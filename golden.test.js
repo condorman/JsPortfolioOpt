@@ -63,14 +63,6 @@ const SPY_PRICES_CSV = path.join(
   'spy_prices.csv',
 )
 
-function getCase(caseId) {
-  const scenario = fixture.cases.find((c) => c.id === caseId)
-  if (!scenario) {
-    throw new Error(`Case not found in golden fixture: ${caseId}`)
-  }
-  return scenario
-}
-
 function toIsoDate(date) {
   return `${date}T00:00:00`
 }
@@ -212,86 +204,6 @@ function dropRowsWithAnyNull(rows, dates) {
   return { rows: outRows, dates: outDates }
 }
 
-function returnsLikePython(pricesRows) {
-  const out = []
-  for (let i = 1; i < pricesRows.length; i += 1) {
-    const row = []
-    for (let j = 0; j < pricesRows[i].length; j += 1) {
-      const prev = pricesRows[i - 1][j]
-      const next = pricesRows[i][j]
-      if (prev == null || next == null || prev === 0) {
-        row.push(null)
-      } else {
-        row.push(next / prev - 1)
-      }
-    }
-    out.push(row)
-  }
-  return out
-}
-
-function returnsWithNullsLikePandas(pricesRows) {
-  const out = []
-  for (let i = 1; i < pricesRows.length; i += 1) {
-    const row = []
-    for (let j = 0; j < pricesRows[i].length; j += 1) {
-      const prev = pricesRows[i - 1][j]
-      const next = pricesRows[i][j]
-      if (prev == null || next == null || prev === 0) {
-        row.push(null)
-      } else {
-        row.push(next / prev - 1)
-      }
-    }
-    // pandas dropna(how="all")
-    if (row.some((v) => v != null && Number.isFinite(v))) {
-      out.push(row)
-    }
-  }
-  return out
-}
-
-function pairwiseCovarianceFromNullableReturns(returnsRows, frequency = 252) {
-  const nAssets = returnsRows[0].length
-  const out = Array.from({ length: nAssets }, () => Array(nAssets).fill(0))
-
-  for (let i = 0; i < nAssets; i += 1) {
-    for (let j = i; j < nAssets; j += 1) {
-      const xi = []
-      const xj = []
-      for (const row of returnsRows) {
-        const a = row[i]
-        const b = row[j]
-        if (a != null && b != null && Number.isFinite(a) && Number.isFinite(b)) {
-          xi.push(a)
-          xj.push(b)
-        }
-      }
-
-      let cov = 0
-      if (xi.length >= 2) {
-        const mi = xi.reduce((acc, v) => acc + v, 0) / xi.length
-        const mj = xj.reduce((acc, v) => acc + v, 0) / xj.length
-        let acc = 0
-        for (let k = 0; k < xi.length; k += 1) {
-          acc += (xi[k] - mi) * (xj[k] - mj)
-        }
-        cov = acc / (xi.length - 1)
-      }
-
-      const annualized = cov * frequency
-      out[i][j] = annualized
-      out[j][i] = annualized
-    }
-  }
-
-  return out
-}
-
-function dropRowsWithNull(rows) {
-  return rows.filter((row) => row.every((v) => v != null && Number.isFinite(v)))
-}
-
 function meanRowWise(matrix) {
   return matrix.map((row) => row.reduce((acc, v) => acc + v, 0) / row.length)
 }
@@ -321,60 +233,9 @@ function vectorToMap(keys, values) {
   return Object.fromEntries(keys.map((k, i) => [k, values[i]]))
 }
 
-function getMatrixLike(value) {
-  if (Array.isArray(value)) {
-    return value
-  }
-  if (value && typeof value === 'object' && value.type === 'dataframe' && Array.isArray(value.data)) {
-    return value.data
-  }
-  throw new Error('Expected a matrix-like value')
-}
-
-function compareMinCovDeterminantLoose(actual, expected) {
-  const actualData = getMatrixLike(actual)
-  const expectedData = getMatrixLike(expected)
-
-  expect(actualData.length).toBe(expectedData.length)
-  expect(actualData[0].length).toBe(expectedData[0].length)
-
-  let maxAbsDiff = 0
-  let sumAbsDiff = 0
-  let n = 0
-  for (let i = 0; i < actualData.length; i += 1) {
-    for (let j = 0; j < actualData[0].length; j += 1) {
-      const diff = Math.abs(actualData[i][j] - expectedData[i][j])
-      maxAbsDiff = Math.max(maxAbsDiff, diff)
-      sumAbsDiff += diff
-      n += 1
-    }
-  }
-
-  const meanAbsDiff = sumAbsDiff / n
-  expect(maxAbsDiff).toBeLessThan(0.03)
-  expect(meanAbsDiff).toBeLessThan(0.012)
-}
-
 function compareScenarioWithGolden(scenario, actual) {
-  expect(scenario.expected.status).toBe('pass')
   const normalizedActual = canonicalize(actual)
-
-  if (scenario.id.includes('min_cov_determinant')) {
-    compareMinCovDeterminantLoose(normalizedActual, scenario.expected.result)
-    return
-  }
-
-  expectCloseRecursive(normalizedActual, scenario.expected.result, scenario.tolerance)
-}
-
-function setupEfficientFrontierFixture() {
-  const expectedReturns = [0.12, 0.08, 0.05]
-  const covMatrix = [
-    [0.04, 0.01, 0.0],
-    [0.01, 0.05, 0.005],
-    [0.0, 0.005, 0.03],
-  ]
-  return new EfficientFrontier(expectedReturns, covMatrix, { tickers: ['A', 'B', 'C'] })
+  expectCloseRecursive(normalizedActual, scenario.expected, scenario.tolerance)
 }
 
 function buildParityContext() {
@@ -448,9 +309,6 @@ function buildParityContext() {
   pSmall[1][1] = 1
   pSmall[2][2] = 1
 
-  const rawReturnsWithNulls = returnsWithNullsLikePandas(stockRaw.rows)
-  const rawSampleCov = pairwiseCovarianceFromNullableReturns(rawReturnsWithNulls, 252)
-
   return {
     tickers,
     nAssets,
@@ -476,7 +334,6 @@ function buildParityContext() {
     piSmall: Array.from({ length: nAssets }, () => [0]),
     confidencesSmall: [0.6, 0.7, 0.8],
     lastDateIso: cleanIsoDates[cleanIsoDates.length - 1],
-    rawSampleCov,
   }
 }
 
@@ -785,70 +642,8 @@ function buildApiScenarioExecutors(ctx) {
   }
 }
 
-function buildExtraScenarioExecutors(ctx) {
-  return {
-    'extra::black_litterman::default_omega': () =>
-      BlackLittermanModel.defaultOmega(ctx.rawSampleCov, ctx.pSmall, 0.05),
-
-    'extra::black_litterman::idzorek_method': () =>
-      BlackLittermanModel.idzorekMethod(
-        ctx.confidencesSmall,
-        ctx.rawSampleCov,
-        ctx.piSmall,
-        ctx.qSmall,
-        ctx.pSmall,
-        0.05,
-      ),
-
-    'extra::risk_models::min_cov_determinant': () => {
-      const stockRaw = parseStockPricesCsv()
-      const returns = dropRowsWithNull(returnsLikePython(stockRaw.rows))
-      return minCovDeterminant(returns, { returnsData: true })
-    },
-
-    'extra::base_optimizer::deepcopy': () => {
-      const ef = setupEfficientFrontierFixture()
-      ef.addConstraint(() => true)
-      ef.addConstraint(() => true)
-      const baseCount = ef._additionalConstraints.length
-      const clone = ef.deepcopy()
-      const cloneBefore = clone._additionalConstraints.length
-      clone.addConstraint(() => true)
-      const cloneAfter = clone._additionalConstraints.length
-      const baseAfter = ef._additionalConstraints.length
-      return {
-        base_count: baseCount,
-        clone_before: cloneBefore,
-        clone_after: cloneAfter,
-        base_after: baseAfter,
-      }
-    },
-
-    'extra::base_optimizer::is_parameter_defined': () => {
-      const ef = setupEfficientFrontierFixture()
-      ef.addObjective(() => 0)
-      return {
-        gamma_defined: ef.isParameterDefined('gamma'),
-        missing_defined: ef.isParameterDefined('missing_parameter'),
-      }
-    },
-
-    'extra::base_optimizer::update_parameter_value': () => {
-      const ef = setupEfficientFrontierFixture()
-      ef.addObjective(() => 0)
-      ef.minVolatility()
-      ef.updateParameterValue('gamma', 2.5)
-      return {
-        gamma: ef._parameters.get('gamma'),
-        gamma_defined: ef.isParameterDefined('gamma'),
-      }
-    },
-  }
-}
-
 const parityContext = buildParityContext()
 const apiScenarioExecutors = buildApiScenarioExecutors(parityContext)
-const extraCaseExecutors = buildExtraScenarioExecutors(parityContext)
 const DEFAULT_KNOWN_PARITY_GAP_IDS = [
   'api::pypfopt.discrete_allocation.DiscreteAllocation',
   'api::pypfopt.efficient_frontier.EfficientSemivariance',
@@ -904,77 +699,57 @@ const EXPECTED_PUBLIC_API_NAMES = [
 
 describe('golden fixture schema', () => {
   it('contains required top-level keys', () => {
-    for (const key of ['schemaVersion', 'baseline', 'environment', 'datasets', 'cases', 'coverage']) {
+    for (const key of ['datasets', 'tests']) {
       expect(fixture).toHaveProperty(key)
     }
   })
 
-  it('contains consistent scenario counters and expected baseline totals', () => {
-    expect(Array.isArray(fixture.cases)).toBe(true)
-    expect(fixture.cases.length).toBe(fixture.coverage.total_cases)
-    expect(fixture.coverage.cases_from_tests).toBe(0)
-    expect(fixture.coverage.cases_extra_api).toBe(0)
-    expect(fixture.coverage.cases_api_methods).toBe(EXPECTED_PUBLIC_API_NAMES.length)
-    expect(fixture.coverage.total_cases).toBe(EXPECTED_PUBLIC_API_NAMES.length)
+  it('contains only the expected number of public API tests', () => {
+    expect(Array.isArray(fixture.tests)).toBe(true)
+    expect(fixture.tests.length).toBe(EXPECTED_PUBLIC_API_NAMES.length)
   })
 
-  it('ensures every case has the expected schema fields', () => {
-    for (const scenario of fixture.cases) {
+  it('ensures every test has the minimal schema fields', () => {
+    for (const testCase of fixture.tests) {
       for (const key of [
         'id',
-        'module',
-        'source_test',
-        'call',
-        'inputs_ref',
+        'api',
+        'symbol',
+        'datasets',
         'expected',
         'tolerance',
-        'expectation_kind',
       ]) {
-        expect(scenario).toHaveProperty(key)
+        expect(testCase).toHaveProperty(key)
       }
     }
   })
 
-  it('has no missing API coverage and gate is passed', () => {
-    expect(fixture.coverage.missingApi).toEqual([])
-    expect(fixture.coverage.gatePassed).toBe(true)
-  })
-
-  it('stores non-null expected.result for every api_method_scenario', () => {
-    const apiCases = fixture.cases.filter((scenario) => scenario.call?.kind === 'api_method_scenario')
-    expect(apiCases.length).toBe(fixture.coverage.cases_api_methods)
-    for (const scenario of apiCases) {
-      expect(scenario.expected.result).not.toBeNull()
+  it('stores non-null expected value for every API test', () => {
+    for (const testCase of fixture.tests) {
+      expect(testCase.expected).not.toBeNull()
     }
-    expect(fixture.coverage.apiCasesMissingResult).toEqual([])
-    expect(fixture.coverage.apiCasesFailed).toEqual([])
-    expect(fixture.coverage.apiMethodNamesMissing).toEqual([])
-    expect(Array.isArray(fixture.coverage.apiMethodNamesGenerated)).toBe(true)
   })
 })
 
 describe('golden parity dispatcher (pure JS backend)', () => {
-  it('has an API executor for each api_method_scenario symbol', () => {
-    const apiSymbols = fixture.cases
-      .filter((s) => s.call?.kind === 'api_method_scenario')
-      .map((s) => s.call.symbol)
-      .sort()
+  it('has an API executor for each test symbol', () => {
+    const apiSymbols = fixture.tests.map((s) => s.symbol).sort()
     for (const symbol of apiSymbols) {
       expect(typeof apiScenarioExecutors[symbol]).toBe('function')
     }
   })
 
   it('runs all JS-executable scenarios and compares with golden expected outputs', () => {
-    const runnableScenarios = fixture.cases.filter((scenario) => scenario.call?.kind === 'api_method_scenario')
+    const runnableScenarios = fixture.tests
 
     const failures = []
-    for (const scenario of runnableScenarios) {
+    for (const testCase of runnableScenarios) {
       try {
-        const actual = apiScenarioExecutors[scenario.call.symbol]()
-        compareScenarioWithGolden(scenario, actual)
+        const actual = apiScenarioExecutors[testCase.symbol]()
+        compareScenarioWithGolden(testCase, actual)
       } catch (error) {
         const message = error instanceof Error ? error.message.split('\n')[0] : String(error)
-        failures.push({ id: scenario.id, message })
+        failures.push({ id: testCase.id, message })
       }
     }
 
@@ -997,20 +772,17 @@ describe('golden parity dispatcher (pure JS backend)', () => {
 })
 
 describe('golden fixture critical invariants', () => {
-  it('contains only api_method_scenario cases', () => {
-    expect(fixture.cases.every((s) => s.call?.kind === 'api_method_scenario')).toBe(true)
-  })
-
-  it('tracks pass/fail scenario counters', () => {
-    expect(fixture.coverage.scenarioPasses + fixture.coverage.scenarioFailures).toBe(
-      fixture.coverage.total_cases,
-    )
-  })
-
   it('keeps public API name coverage exact', () => {
-    const generated = (fixture.coverage.apiMethodNamesGenerated ?? []).slice().sort()
+    const generated = fixture.tests.map((t) => t.api).slice().sort()
     expect(generated).toEqual(EXPECTED_PUBLIC_API_NAMES)
-    expect(fixture.coverage.apiMethodNamesMissing).toEqual([])
-    expect(fixture.coverage.apiMethodNamesExtra).toEqual([])
+  })
+
+  it('references only declared datasets', () => {
+    const datasetKeys = new Set(Object.keys(fixture.datasets))
+    for (const testCase of fixture.tests) {
+      for (const ref of testCase.datasets) {
+        expect(datasetKeys.has(ref)).toBe(true)
+      }
+    }
   })
 })
