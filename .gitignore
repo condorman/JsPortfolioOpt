@@ -1,0 +1,10 @@
+# Envs
+env_*/
+
+# Node.js
+node_modules/
+npm-debug.log*
+*.tgz
+
+# Other
+references/
