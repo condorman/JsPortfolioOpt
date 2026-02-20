@@ -18,34 +18,6 @@ pip install -U pip
 pip install -r requirements.in
 ```
 
-Recommended runtime for golden fidelity: Python `3.9` to `3.12`.
-With Python `3.13` + newest numerical stack, some upstream tests may fail due compatibility changes.
-
-Recommended dedicated env for golden:
-
-```bash
-./scripts/bootstrap_golden_env.sh
-```
-
-Generate the full golden fixture with strict gates:
-
-```bash
-PYTHONPATH=references/PyPortfolioOpt-main \
-  .venv_golden/bin/python generate_golden.py \
-  --include-skipif \
-  --strict \
-  --fail-on-missing
-```
-
-Quick accuracy check (coverage gate + deterministic rebuild):
-
-```bash
-PYTHONPATH=references/PyPortfolioOpt-main \
-  .venv_golden/bin/python generate_golden.py \
-  --include-skipif \
-  --strict \
-  --fail-on-missing
-```
 
 Output:
 

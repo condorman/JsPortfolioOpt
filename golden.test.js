@@ -49,18 +49,12 @@ const fixture = JSON.parse(fs.readFileSync(fixturePath, 'utf8'))
 
 const STOCK_PRICES_CSV = path.join(
   __dirname,
-  'references',
-  'PyPortfolioOpt-main',
-  'tests',
-  'resources',
+  'data',
   'stock_prices.csv',
 )
 const SPY_PRICES_CSV = path.join(
   __dirname,
-  'references',
-  'PyPortfolioOpt-main',
-  'tests',
-  'resources',
+  'data',
   'spy_prices.csv',
 )
 

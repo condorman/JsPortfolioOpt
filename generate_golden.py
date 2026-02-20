@@ -33,7 +33,8 @@ import numpy as np
 import pandas as pd
 
 ROOT = Path(__file__).resolve().parent
-DEFAULT_BASELINE_ROOT = ROOT / "references" / "PyPortfolioOpt-main"
+DEFAULT_BASELINE_ROOT = ROOT / ".venv_golden" / "lib" / "python3.9" / "site-packages"
+DEFAULT_DATA_ROOT = ROOT / "data"
 DEFAULT_OUTPUT = ROOT / "golden-PyPortfolioOpt" / "golden.json"
 
 DEFAULT_TOLERANCE = {"atol": 1e-8, "rtol": 1e-6}
@@ -41,9 +42,32 @@ SOLVER_SENSITIVE_TOLERANCE = {"atol": 1e-4, "rtol": 1e-3}
 INVARIANT_TOLERANCE = {"atol": 0.0, "rtol": 0.0}
 
 DATASET_FILES = {
-    "stock_prices": "tests/resources/stock_prices.csv",
-    "spy_prices": "tests/resources/spy_prices.csv",
-    "cov_matrix": "tests/resources/cov_matrix.csv",
+    "stock_prices": "stock_prices.csv",
+    "spy_prices": "spy_prices.csv",
+    "cov_matrix": "cov_matrix.csv",
+}
+
+MARKET_CAPS = {
+    "GOOG": 927e9,
+    "AAPL": 1.19e12,
+    "FB": 574e9,
+    "BABA": 533e9,
+    "AMZN": 867e9,
+    "GE": 96e9,
+    "AMD": 43e9,
+    "WMT": 339e9,
+    "BAC": 301e9,
+    "GM": 51e9,
+    "T": 61e9,
+    "UAA": 78e9,
+    "SHLD": 0,
+    "XOM": 295e9,
+    "RRC": 1e9,
+    "BBY": 22e9,
+    "MA": 288e9,
+    "PFE": 212e9,
+    "JPM": 422e9,
+    "SBUX": 102e9,
 }
 
 PUBLIC_API = [
@@ -144,7 +168,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--baseline-root",
         default=str(DEFAULT_BASELINE_ROOT),
-        help="Path to PyPortfolioOpt baseline root",
+        help="Path to PyPortfolioOpt import root (site-packages or package directory)",
+    )
+    parser.add_argument(
+        "--data-root",
+        default=str(DEFAULT_DATA_ROOT),
+        help="Path containing stock_prices.csv, spy_prices.csv and cov_matrix.csv",
     )
     parser.add_argument(
         "--output",
@@ -215,16 +244,20 @@ def force_baseline_imports(baseline_root: Path):
     if not baseline_root.exists():
         raise SystemExit(f"Baseline root does not exist: {baseline_root}")
 
-    sys.path.insert(0, str(baseline_root.resolve()))
+    import_root = baseline_root.resolve()
+    if import_root.name == "pypfopt" and (import_root / "__init__.py").exists():
+        import_root = import_root.parent
+
+    sys.path.insert(0, str(import_root))
     if "pypfopt" in sys.modules:
         del sys.modules["pypfopt"]
 
     pypfopt = importlib.import_module("pypfopt")
     pypfopt_file = Path(pypfopt.__file__).resolve()
-    if not path_is_under(pypfopt_file, baseline_root):
+    if not path_is_under(pypfopt_file, import_root):
         raise SystemExit(
             "Baseline guardrail failed: imported pypfopt from "
-            f"{pypfopt_file}, expected under {baseline_root.resolve()}"
+            f"{pypfopt_file}, expected under {import_root.resolve()}"
         )
     return pypfopt
 
@@ -284,10 +317,10 @@ def canonicalize(value: Any) -> Any:
     return value
 
 
-def build_dataset_refs(baseline_root: Path) -> Dict[str, Any]:
+def build_dataset_refs(data_root: Path) -> Dict[str, Any]:
     refs: Dict[str, str] = {}
     for name, rel in DATASET_FILES.items():
-        abs_path = baseline_root / rel
+        abs_path = data_root / rel
         if not abs_path.exists():
             raise SystemExit(f"Missing dataset file: {abs_path}")
         refs[name] = str(abs_path.resolve())
@@ -348,7 +381,7 @@ def patch_cla_numpy2_compat() -> None:
     cla_module.CLA._compute_lambda = _compute_lambda_numpy2_compat
 
 
-def build_api_specs(selected_modules: Sequence[str]) -> List[ApiSpec]:
+def build_api_specs(selected_modules: Sequence[str], data_root: Path) -> List[ApiSpec]:
     import cvxpy as cp  # noqa: PLC0415
     from pypfopt import (  # noqa: PLC0415
         CLA,
@@ -370,16 +403,18 @@ def build_api_specs(selected_modules: Sequence[str]) -> List[ApiSpec]:
         market_implied_risk_aversion,
     )
     from pypfopt.discrete_allocation import get_latest_prices  # noqa: PLC0415
-    from tests.utilities_for_tests import (  # noqa: PLC0415
-        get_benchmark_data,
-        get_data,
-        get_market_caps,
-    )
 
-    df = get_data()
+    stock_prices_path = data_root / DATASET_FILES["stock_prices"]
+    spy_prices_path = data_root / DATASET_FILES["spy_prices"]
+
+    for required_path in (stock_prices_path, spy_prices_path):
+        if not required_path.exists():
+            raise SystemExit(f"Missing required dataset file: {required_path}")
+
+    df = pd.read_csv(stock_prices_path, parse_dates=["date"], index_col="date")
     df_clean = df.dropna(axis=0, how="any")
-    benchmark_prices = get_benchmark_data().squeeze("columns")
-    market_caps = get_market_caps()
+    benchmark_prices = pd.read_csv(spy_prices_path, parse_dates=["date"], index_col="date").squeeze("columns")
+    market_caps = dict(MARKET_CAPS)
 
     returns_df = expected_returns.returns_from_prices(df_clean)
     mu = expected_returns.mean_historical_return(df_clean)
@@ -965,19 +1000,20 @@ def build_fixture(args: argparse.Namespace) -> Dict[str, Any]:
     np.random.seed(args.seed)
 
     baseline_root = Path(args.baseline_root).resolve()
+    data_root = Path(args.data_root).resolve()
     output_path = Path(args.output).resolve()
 
     force_baseline_imports(baseline_root)
     patch_cla_numpy2_compat()
 
     selected_modules = parse_modules(args.modules)
-    dataset_refs = build_dataset_refs(baseline_root)
+    dataset_refs = build_dataset_refs(data_root)
 
     tests: List[Dict[str, Any]] = []
     generated_api_names: List[str] = []
     seen_ids: set[str] = set()
 
-    for spec in build_api_specs(selected_modules):
+    for spec in build_api_specs(selected_modules, data_root):
         try:
             expected = canonicalize(spec.fn())
         except Exception as exc:
