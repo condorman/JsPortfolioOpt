@@ -44,6 +44,8 @@ INVARIANT_TOLERANCE = {"atol": 0.0, "rtol": 0.0}
 DATASET_FILES = {
     "stock_prices": "stock_prices.csv",
     "spy_prices": "spy_prices.csv",
+    "stock_prices_weekly": "stock_prices_weekly.csv",
+    "spy_prices_weekly": "spy_prices_weekly.csv",
 }
 
 MARKET_CAPS = {
