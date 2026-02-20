@@ -23,6 +23,7 @@ import {
   exPostTrackingError,
   expCov,
   fixNonpositiveSemidefinite,
+  getPrior,
   getLatestPrices,
   marketImpliedPriorReturns,
   marketImpliedRiskAversion,
@@ -252,6 +253,7 @@ function buildParityContext() {
   const returnsIsoDates = cleanIsoDates.slice(1)
 
   const muVector = meanHistoricalReturn(cleanRows)
+  const muByTicker = vectorToMap(tickers, muVector)
   const covMatrix = sampleCov(cleanRows)
 
   const latestPriceVector = getLatestPrices(cleanRows)
@@ -317,6 +319,7 @@ function buildParityContext() {
     returnsMatrix,
     returnsIsoDates,
     muVector,
+    muByTicker,
     covMatrix,
     latestPricesByTicker,
     equalWeights,
@@ -470,8 +473,17 @@ function buildApiScenarioExecutors(ctx) {
     'pypfopt.black_litterman.BlackLittermanModel': (params = {}) => {
       const tau = params.tau ?? 0.05
       const riskFreeRate = params.risk_free_rate ?? 0.02
+      const pi =
+        typeof params.prior_method === 'string'
+          ? getPrior(ctx.returnsMatrix, {
+              mu: ctx.muByTicker,
+              priorMethod: params.prior_method,
+              priorBlendAlpha: params.prior_blend_alpha ?? 0.5,
+              tickers: ctx.tickers,
+            })
+          : ctx.prior
       const modelOptions = {
-        pi: ctx.prior,
+        pi,
         absoluteViews: ctx.absoluteViews,
         tickers: ctx.tickers,
         tau,

@@ -84,7 +84,14 @@ npm test
 - `src/black_litterman.js`
 - `src/hierarchical_portfolio.js`
 - `src/discrete_allocation.js`
+- `src/custom.js` (JS-only extensions, not part of PyPortfolioOpt)
 - `src/index.js`
 
 Note: the pure-JS backend is now partially implemented for core optimizers and utilities.
 Exact solver parity with PyPortfolioOpt (especially CLA/convex edge-cases) is still in progress.
+
+Custom extension example:
+
+```js
+import { getPrior } from 'jsportfolioopt'
+```

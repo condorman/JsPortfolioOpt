@@ -408,11 +408,12 @@ def build_api_specs(selected_modules: Sequence[str]) -> List[ApiSpec]:
         *,
         tau: float,
         risk_free_rate: float,
+        pi: pd.Series | np.ndarray | Dict[str, float] | None = None,
         omega: str | None = None,
         view_confidences: Sequence[float] | None = None,
     ) -> Dict[str, Any]:
         kwargs: Dict[str, Any] = {
-            "pi": prior,
+            "pi": prior if pi is None else pi,
             "absolute_views": absolute_views,
             "tau": tau,
         }
@@ -434,6 +435,17 @@ def build_api_specs(selected_modules: Sequence[str]) -> List[ApiSpec]:
             "bl_weights": bl_weights,
             "portfolio_performance": perf,
         }
+
+    def custom_prior_for_bl(
+        prior_method: str,
+        prior_blend_alpha: float = 0.5,
+    ) -> pd.Series:
+        return get_prior(
+            returns_df,
+            mu=mu if prior_method == "momentum_positive" else None,
+            prior_method=prior_method,
+            prior_blend_alpha=prior_blend_alpha,
+        )
 
     specs = [
         ApiSpec(
@@ -627,6 +639,97 @@ def build_api_specs(selected_modules: Sequence[str]) -> List[ApiSpec]:
                 "risk_free_rate": 0.02,
                 "omega": "idzorek",
                 "view_confidences": [0.55, 0.7, 0.9],
+            },
+        ),
+        ApiSpec(
+            api="BlackLittermanModel",
+            symbol="pypfopt.black_litterman.BlackLittermanModel",
+            module="black_litterman",
+            datasets=["stock_prices", "spy_prices"],
+            tolerance=SOLVER_SENSITIVE_TOLERANCE,
+            fn=lambda: black_litterman_payload(
+                tau=0.05,
+                risk_free_rate=0.02,
+                pi=custom_prior_for_bl("equal_weighted"),
+            ),
+            case_id="api::pypfopt.black_litterman.BlackLittermanModel::pi_get_prior_equal_weighted_tau_0_05_rfr_0_02",
+            params={
+                "tau": 0.05,
+                "risk_free_rate": 0.02,
+                "prior_method": "equal_weighted",
+            },
+        ),
+        ApiSpec(
+            api="BlackLittermanModel",
+            symbol="pypfopt.black_litterman.BlackLittermanModel",
+            module="black_litterman",
+            datasets=["stock_prices", "spy_prices"],
+            tolerance=SOLVER_SENSITIVE_TOLERANCE,
+            fn=lambda: black_litterman_payload(
+                tau=0.05,
+                risk_free_rate=0.02,
+                pi=custom_prior_for_bl("risk_parity"),
+            ),
+            case_id="api::pypfopt.black_litterman.BlackLittermanModel::pi_get_prior_risk_parity_tau_0_05_rfr_0_02",
+            params={
+                "tau": 0.05,
+                "risk_free_rate": 0.02,
+                "prior_method": "risk_parity",
+            },
+        ),
+        ApiSpec(
+            api="BlackLittermanModel",
+            symbol="pypfopt.black_litterman.BlackLittermanModel",
+            module="black_litterman",
+            datasets=["stock_prices", "spy_prices"],
+            tolerance=SOLVER_SENSITIVE_TOLERANCE,
+            fn=lambda: black_litterman_payload(
+                tau=0.05,
+                risk_free_rate=0.02,
+                pi=custom_prior_for_bl("inverse_variance"),
+            ),
+            case_id="api::pypfopt.black_litterman.BlackLittermanModel::pi_get_prior_inverse_variance_tau_0_05_rfr_0_02",
+            params={
+                "tau": 0.05,
+                "risk_free_rate": 0.02,
+                "prior_method": "inverse_variance",
+            },
+        ),
+        ApiSpec(
+            api="BlackLittermanModel",
+            symbol="pypfopt.black_litterman.BlackLittermanModel",
+            module="black_litterman",
+            datasets=["stock_prices", "spy_prices"],
+            tolerance=SOLVER_SENSITIVE_TOLERANCE,
+            fn=lambda: black_litterman_payload(
+                tau=0.05,
+                risk_free_rate=0.02,
+                pi=custom_prior_for_bl("momentum_positive"),
+            ),
+            case_id="api::pypfopt.black_litterman.BlackLittermanModel::pi_get_prior_momentum_positive_tau_0_05_rfr_0_02",
+            params={
+                "tau": 0.05,
+                "risk_free_rate": 0.02,
+                "prior_method": "momentum_positive",
+            },
+        ),
+        ApiSpec(
+            api="BlackLittermanModel",
+            symbol="pypfopt.black_litterman.BlackLittermanModel",
+            module="black_litterman",
+            datasets=["stock_prices", "spy_prices"],
+            tolerance=SOLVER_SENSITIVE_TOLERANCE,
+            fn=lambda: black_litterman_payload(
+                tau=0.05,
+                risk_free_rate=0.02,
+                pi=custom_prior_for_bl("blend_eq_inv_vol", prior_blend_alpha=0.35),
+            ),
+            case_id="api::pypfopt.black_litterman.BlackLittermanModel::pi_get_prior_blend_eq_inv_vol_alpha_0_35_tau_0_05_rfr_0_02",
+            params={
+                "tau": 0.05,
+                "risk_free_rate": 0.02,
+                "prior_method": "blend_eq_inv_vol",
+                "prior_blend_alpha": 0.35,
             },
         ),
         ApiSpec(
