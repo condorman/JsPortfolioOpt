@@ -405,20 +405,34 @@ def build_api_specs(selected_modules: Sequence[str], data_root: Path) -> List[Ap
 
     stock_prices_path = data_root / DATASET_FILES["stock_prices"]
     spy_prices_path = data_root / DATASET_FILES["spy_prices"]
+    stock_prices_weekly_path = data_root / DATASET_FILES["stock_prices_weekly"]
+    spy_prices_weekly_path = data_root / DATASET_FILES["spy_prices_weekly"]
 
-    for required_path in (stock_prices_path, spy_prices_path):
+    for required_path in (
+        stock_prices_path,
+        spy_prices_path,
+        stock_prices_weekly_path,
+        spy_prices_weekly_path,
+    ):
         if not required_path.exists():
             raise SystemExit(f"Missing required dataset file: {required_path}")
 
     df = pd.read_csv(stock_prices_path, parse_dates=["date"], index_col="date")
     df_clean = df.dropna(axis=0, how="any")
     benchmark_prices = pd.read_csv(spy_prices_path, parse_dates=["date"], index_col="date").squeeze("columns")
+    df_weekly = pd.read_csv(stock_prices_weekly_path, parse_dates=["date"], index_col="date")
+    df_weekly_clean = df_weekly.dropna(axis=0, how="any")
+    benchmark_prices_weekly = pd.read_csv(
+        spy_prices_weekly_path, parse_dates=["date"], index_col="date"
+    ).squeeze("columns")
     market_caps = dict(MARKET_CAPS)
 
     returns_df = expected_returns.returns_from_prices(df_clean)
     mu = expected_returns.mean_historical_return(df_clean)
     cov = risk_models.sample_cov(df_clean)
     latest_prices = get_latest_prices(df_clean)
+    returns_df_weekly = expected_returns.returns_from_prices(df_weekly_clean)
+    mu_weekly = expected_returns.mean_historical_return(df_weekly_clean, frequency=52)
 
     tickers = list(cov.columns)
     n_assets = len(tickers)
@@ -519,12 +533,34 @@ def build_api_specs(selected_modules: Sequence[str], data_root: Path) -> List[Ap
             fn=lambda: expected_returns.return_model(df_clean, method="mean_historical_return"),
         ),
         ApiSpec(
+            api="return_model",
+            symbol="pypfopt.expected_returns.return_model",
+            module="expected_returns",
+            datasets=["stock_prices_weekly"],
+            tolerance=DEFAULT_TOLERANCE,
+            fn=lambda: expected_returns.return_model(
+                df_weekly_clean, method="mean_historical_return", frequency=52
+            ),
+            case_id="api::pypfopt.expected_returns.return_model::frequency_52_weekly",
+            params={"method": "mean_historical_return", "frequency": 52},
+        ),
+        ApiSpec(
             api="mean_historical_return",
             symbol="pypfopt.expected_returns.mean_historical_return",
             module="expected_returns",
             datasets=["stock_prices"],
             tolerance=DEFAULT_TOLERANCE,
             fn=lambda: expected_returns.mean_historical_return(df_clean),
+        ),
+        ApiSpec(
+            api="mean_historical_return",
+            symbol="pypfopt.expected_returns.mean_historical_return",
+            module="expected_returns",
+            datasets=["stock_prices_weekly"],
+            tolerance=DEFAULT_TOLERANCE,
+            fn=lambda: expected_returns.mean_historical_return(df_weekly_clean, frequency=52),
+            case_id="api::pypfopt.expected_returns.mean_historical_return::frequency_52_weekly",
+            params={"frequency": 52},
         ),
         ApiSpec(
             api="ema_historical_return",
@@ -535,12 +571,32 @@ def build_api_specs(selected_modules: Sequence[str], data_root: Path) -> List[Ap
             fn=lambda: expected_returns.ema_historical_return(df_clean),
         ),
         ApiSpec(
+            api="ema_historical_return",
+            symbol="pypfopt.expected_returns.ema_historical_return",
+            module="expected_returns",
+            datasets=["stock_prices_weekly"],
+            tolerance=DEFAULT_TOLERANCE,
+            fn=lambda: expected_returns.ema_historical_return(df_weekly_clean, frequency=52),
+            case_id="api::pypfopt.expected_returns.ema_historical_return::frequency_52_weekly",
+            params={"frequency": 52},
+        ),
+        ApiSpec(
             api="risk_matrix",
             symbol="pypfopt.risk_models.risk_matrix",
             module="risk_models",
             datasets=["stock_prices"],
             tolerance=DEFAULT_TOLERANCE,
             fn=lambda: risk_models.risk_matrix(df_clean, method="sample_cov"),
+        ),
+        ApiSpec(
+            api="risk_matrix",
+            symbol="pypfopt.risk_models.risk_matrix",
+            module="risk_models",
+            datasets=["stock_prices_weekly"],
+            tolerance=DEFAULT_TOLERANCE,
+            fn=lambda: risk_models.risk_matrix(df_weekly_clean, method="sample_cov", frequency=52),
+            case_id="api::pypfopt.risk_models.risk_matrix::frequency_52_weekly",
+            params={"method": "sample_cov", "frequency": 52},
         ),
         ApiSpec(
             api="sample_cov",
@@ -551,6 +607,16 @@ def build_api_specs(selected_modules: Sequence[str], data_root: Path) -> List[Ap
             fn=lambda: risk_models.sample_cov(df_clean),
         ),
         ApiSpec(
+            api="sample_cov",
+            symbol="pypfopt.risk_models.sample_cov",
+            module="risk_models",
+            datasets=["stock_prices_weekly"],
+            tolerance=DEFAULT_TOLERANCE,
+            fn=lambda: risk_models.sample_cov(df_weekly_clean, frequency=52),
+            case_id="api::pypfopt.risk_models.sample_cov::frequency_52_weekly",
+            params={"frequency": 52},
+        ),
+        ApiSpec(
             api="semicovariance",
             symbol="pypfopt.risk_models.semicovariance",
             module="risk_models",
@@ -559,12 +625,32 @@ def build_api_specs(selected_modules: Sequence[str], data_root: Path) -> List[Ap
             fn=lambda: risk_models.semicovariance(df_clean),
         ),
         ApiSpec(
+            api="semicovariance",
+            symbol="pypfopt.risk_models.semicovariance",
+            module="risk_models",
+            datasets=["stock_prices_weekly"],
+            tolerance=DEFAULT_TOLERANCE,
+            fn=lambda: risk_models.semicovariance(df_weekly_clean, frequency=52),
+            case_id="api::pypfopt.risk_models.semicovariance::frequency_52_weekly",
+            params={"frequency": 52},
+        ),
+        ApiSpec(
             api="exp_cov",
             symbol="pypfopt.risk_models.exp_cov",
             module="risk_models",
             datasets=["stock_prices"],
             tolerance=SOLVER_SENSITIVE_TOLERANCE,
             fn=lambda: risk_models.exp_cov(df_clean, span=180),
+        ),
+        ApiSpec(
+            api="exp_cov",
+            symbol="pypfopt.risk_models.exp_cov",
+            module="risk_models",
+            datasets=["stock_prices_weekly"],
+            tolerance=SOLVER_SENSITIVE_TOLERANCE,
+            fn=lambda: risk_models.exp_cov(df_weekly_clean, span=180, frequency=52),
+            case_id="api::pypfopt.risk_models.exp_cov::frequency_52_weekly",
+            params={"span": 180, "frequency": 52},
         ),
         ApiSpec(
             api="CovarianceShrinkage",
@@ -578,6 +664,25 @@ def build_api_specs(selected_modules: Sequence[str], data_root: Path) -> List[Ap
                 "ledoit_wolf": CovarianceShrinkage(df_clean).ledoit_wolf(),
                 "oracle_approximating": CovarianceShrinkage(df_clean).oracle_approximating(),
             },
+        ),
+        ApiSpec(
+            api="CovarianceShrinkage",
+            symbol="pypfopt.risk_models.CovarianceShrinkage",
+            module="risk_models",
+            datasets=["stock_prices_weekly"],
+            tolerance=SOLVER_SENSITIVE_TOLERANCE,
+            fn=lambda: {
+                "sample": CovarianceShrinkage(df_weekly_clean, frequency=52).S,
+                "shrunk_covariance": CovarianceShrinkage(
+                    df_weekly_clean, frequency=52
+                ).shrunk_covariance(),
+                "ledoit_wolf": CovarianceShrinkage(df_weekly_clean, frequency=52).ledoit_wolf(),
+                "oracle_approximating": CovarianceShrinkage(
+                    df_weekly_clean, frequency=52
+                ).oracle_approximating(),
+            },
+            case_id="api::pypfopt.risk_models.CovarianceShrinkage::frequency_52_weekly",
+            params={"frequency": 52},
         ),
         ApiSpec(
             api="portfolio_variance",
@@ -820,6 +925,18 @@ def build_api_specs(selected_modules: Sequence[str], data_root: Path) -> List[Ap
             api="market_implied_risk_aversion",
             symbol="pypfopt.black_litterman.market_implied_risk_aversion",
             module="black_litterman",
+            datasets=["spy_prices_weekly"],
+            tolerance=DEFAULT_TOLERANCE,
+            fn=lambda: market_implied_risk_aversion(
+                benchmark_prices_weekly, frequency=52, risk_free_rate=0.02
+            ),
+            case_id="api::pypfopt.black_litterman.market_implied_risk_aversion::frequency_52_weekly",
+            params={"risk_free_rate": 0.02, "frequency": 52},
+        ),
+        ApiSpec(
+            api="market_implied_risk_aversion",
+            symbol="pypfopt.black_litterman.market_implied_risk_aversion",
+            module="black_litterman",
             datasets=["spy_prices"],
             tolerance=DEFAULT_TOLERANCE,
             fn=lambda: market_implied_risk_aversion(benchmark_prices, risk_free_rate=0.0),
@@ -830,11 +947,35 @@ def build_api_specs(selected_modules: Sequence[str], data_root: Path) -> List[Ap
             api="market_implied_risk_aversion",
             symbol="pypfopt.black_litterman.market_implied_risk_aversion",
             module="black_litterman",
+            datasets=["spy_prices_weekly"],
+            tolerance=DEFAULT_TOLERANCE,
+            fn=lambda: market_implied_risk_aversion(
+                benchmark_prices_weekly, frequency=52, risk_free_rate=0.0
+            ),
+            case_id="api::pypfopt.black_litterman.market_implied_risk_aversion::rfr_0_00::frequency_52_weekly",
+            params={"risk_free_rate": 0.0, "frequency": 52},
+        ),
+        ApiSpec(
+            api="market_implied_risk_aversion",
+            symbol="pypfopt.black_litterman.market_implied_risk_aversion",
+            module="black_litterman",
             datasets=["spy_prices"],
             tolerance=DEFAULT_TOLERANCE,
             fn=lambda: market_implied_risk_aversion(benchmark_prices, risk_free_rate=0.01),
             case_id="api::pypfopt.black_litterman.market_implied_risk_aversion::rfr_0_01",
             params={"risk_free_rate": 0.01},
+        ),
+        ApiSpec(
+            api="market_implied_risk_aversion",
+            symbol="pypfopt.black_litterman.market_implied_risk_aversion",
+            module="black_litterman",
+            datasets=["spy_prices_weekly"],
+            tolerance=DEFAULT_TOLERANCE,
+            fn=lambda: market_implied_risk_aversion(
+                benchmark_prices_weekly, frequency=52, risk_free_rate=0.01
+            ),
+            case_id="api::pypfopt.black_litterman.market_implied_risk_aversion::rfr_0_01::frequency_52_weekly",
+            params={"risk_free_rate": 0.01, "frequency": 52},
         ),
         ApiSpec(
             api="CLA",
@@ -862,6 +1003,24 @@ def build_api_specs(selected_modules: Sequence[str], data_root: Path) -> List[Ap
                     lambda hrp=HRPOpt(returns_df): (hrp.optimize(), hrp.portfolio_performance())[1]
                 )(),
             },
+        ),
+        ApiSpec(
+            api="HRPOpt",
+            symbol="pypfopt.hierarchical_portfolio.HRPOpt",
+            module="hrp",
+            datasets=["stock_prices_weekly"],
+            tolerance=SOLVER_SENSITIVE_TOLERANCE,
+            fn=lambda: {
+                "optimize": HRPOpt(returns_df_weekly).optimize(),
+                "portfolio_performance": (
+                    lambda hrp=HRPOpt(returns_df_weekly): (
+                        hrp.optimize(),
+                        hrp.portfolio_performance(frequency=52),
+                    )[1]
+                )(),
+            },
+            case_id="api::pypfopt.hierarchical_portfolio.HRPOpt::frequency_52_weekly",
+            params={"frequency": 52},
         ),
         ApiSpec(
             api="BaseOptimizer",
@@ -955,6 +1114,32 @@ def build_api_specs(selected_modules: Sequence[str], data_root: Path) -> List[Ap
                     )[1]
                 )(),
             },
+        ),
+        ApiSpec(
+            api="EfficientSemivariance",
+            symbol="pypfopt.efficient_frontier.EfficientSemivariance",
+            module="efficient_semivariance",
+            datasets=["stock_prices_weekly"],
+            tolerance=SOLVER_SENSITIVE_TOLERANCE,
+            fn=lambda: {
+                "min_semivariance": EfficientSemivariance(
+                    mu_weekly, returns_df_weekly, frequency=52
+                ).min_semivariance(),
+                "efficient_return": EfficientSemivariance(
+                    mu_weekly, returns_df_weekly, frequency=52
+                ).efficient_return(target_return=float(np.percentile(mu_weekly, 30))),
+                "efficient_risk": EfficientSemivariance(
+                    mu_weekly, returns_df_weekly, frequency=52
+                ).efficient_risk(target_semideviation=0.35),
+                "portfolio_performance": (
+                    lambda es=EfficientSemivariance(mu_weekly, returns_df_weekly, frequency=52): (
+                        es.min_semivariance(),
+                        es.portfolio_performance(risk_free_rate=0.02),
+                    )[1]
+                )(),
+            },
+            case_id="api::pypfopt.efficient_frontier.EfficientSemivariance::frequency_52_weekly",
+            params={"frequency": 52},
         ),
         ApiSpec(
             api="EfficientCVaR",
