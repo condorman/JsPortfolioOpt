@@ -200,7 +200,6 @@ def parse_args() -> argparse.Namespace:
     )
     return parser.parse_args()
 
-
 def parse_modules(raw_tokens: Sequence[str]) -> List[str]:
     known = {
         "expected_returns",
@@ -231,7 +230,6 @@ def parse_modules(raw_tokens: Sequence[str]) -> List[str]:
     if unknown:
         raise SystemExit(f"Unknown module(s): {', '.join(unknown)}")
     return sorted(set(tokens))
-
 
 def path_is_under(child: Path, parent: Path) -> bool:
     try:
