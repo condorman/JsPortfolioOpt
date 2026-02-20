@@ -6364,6 +6364,134 @@
     {
       "api": "ema_historical_return",
       "datasets": [
+        "stock_prices"
+      ],
+      "expected": {
+        "data": [
+          0.16064402776145895,
+          0.23236737808020497,
+          0.16749637711193188,
+          0.3281991376401123,
+          0.4718276510945085,
+          -0.5193741125433011,
+          0.269725670874286,
+          0.11269596983796291,
+          0.30160523154269275,
+          0.1312058237813125,
+          0.010428497113714363,
+          -0.1276403711759509,
+          -0.5052601628009697,
+          -0.012950788228993612,
+          -0.3432784942996768,
+          0.4148801739442518,
+          0.34217464914551604,
+          0.09394321778196102,
+          0.27761332543295714,
+          0.09509121289379562
+        ],
+        "index": [
+          "GOOG",
+          "AAPL",
+          "FB",
+          "BABA",
+          "AMZN",
+          "GE",
+          "AMD",
+          "WMT",
+          "BAC",
+          "GM",
+          "T",
+          "UAA",
+          "SHLD",
+          "XOM",
+          "RRC",
+          "BBY",
+          "MA",
+          "PFE",
+          "JPM",
+          "SBUX"
+        ],
+        "name": "2018-04-11T00:00:00",
+        "type": "series"
+      },
+      "id": "api::pypfopt.expected_returns.ema_historical_return::compounding_false",
+      "params": {
+        "compounding": false
+      },
+      "symbol": "pypfopt.expected_returns.ema_historical_return",
+      "tolerance": {
+        "atol": 1e-08,
+        "rtol": 1e-06
+      }
+    },
+    {
+      "api": "ema_historical_return",
+      "datasets": [
+        "stock_prices"
+      ],
+      "expected": {
+        "data": [
+          -0.009848507560483005,
+          0.15106696469439548,
+          -0.058784491537314326,
+          0.07489758442970343,
+          0.43446044859740013,
+          -0.9021265232280179,
+          -0.43067521123236224,
+          -0.07508775891348182,
+          0.17469256415700543,
+          0.015295073491947047,
+          -0.05819678829781819,
+          0.04275629302498303,
+          -0.5248715308521846,
+          -0.056306983149202926,
+          -0.3587894193245368,
+          0.3294687464747159,
+          0.3299835888580695,
+          0.057496151721569404,
+          0.20685058154972133,
+          0.11861248833753966
+        ],
+        "index": [
+          "GOOG",
+          "AAPL",
+          "FB",
+          "BABA",
+          "AMZN",
+          "GE",
+          "AMD",
+          "WMT",
+          "BAC",
+          "GM",
+          "T",
+          "UAA",
+          "SHLD",
+          "XOM",
+          "RRC",
+          "BBY",
+          "MA",
+          "PFE",
+          "JPM",
+          "SBUX"
+        ],
+        "name": "2018-04-11T00:00:00",
+        "type": "series"
+      },
+      "id": "api::pypfopt.expected_returns.ema_historical_return::compounding_false_log_returns_true_span_180",
+      "params": {
+        "compounding": false,
+        "log_returns": true,
+        "span": 180
+      },
+      "symbol": "pypfopt.expected_returns.ema_historical_return",
+      "tolerance": {
+        "atol": 1e-08,
+        "rtol": 1e-06
+      }
+    },
+    {
+      "api": "ema_historical_return",
+      "datasets": [
         "stock_prices_weekly"
       ],
       "expected": {
@@ -6417,6 +6545,132 @@
       "id": "api::pypfopt.expected_returns.ema_historical_return::frequency_52_weekly",
       "params": {
         "frequency": 52
+      },
+      "symbol": "pypfopt.expected_returns.ema_historical_return",
+      "tolerance": {
+        "atol": 1e-08,
+        "rtol": 1e-06
+      }
+    },
+    {
+      "api": "ema_historical_return",
+      "datasets": [
+        "stock_prices"
+      ],
+      "expected": {
+        "data": [
+          0.14608868585651158,
+          0.23216827629342007,
+          0.1449841783264838,
+          0.32113525916944474,
+          0.5457329577610257,
+          -0.42356058122903795,
+          0.10606627956350967,
+          0.09161564673940559,
+          0.3100680224347254,
+          0.10575021078543956,
+          -0.006497075614961156,
+          -0.22263925421829278,
+          -0.548424590716069,
+          -0.027786111085765564,
+          -0.3656351388792496,
+          0.42321975189909833,
+          0.38114267641705135,
+          0.08237782311363073,
+          0.29207817778086964,
+          0.08052857399620339
+        ],
+        "index": [
+          "GOOG",
+          "AAPL",
+          "FB",
+          "BABA",
+          "AMZN",
+          "GE",
+          "AMD",
+          "WMT",
+          "BAC",
+          "GM",
+          "T",
+          "UAA",
+          "SHLD",
+          "XOM",
+          "RRC",
+          "BBY",
+          "MA",
+          "PFE",
+          "JPM",
+          "SBUX"
+        ],
+        "name": "2018-04-11T00:00:00",
+        "type": "series"
+      },
+      "id": "api::pypfopt.expected_returns.ema_historical_return::log_returns_true",
+      "params": {
+        "log_returns": true
+      },
+      "symbol": "pypfopt.expected_returns.ema_historical_return",
+      "tolerance": {
+        "atol": 1e-08,
+        "rtol": 1e-06
+      }
+    },
+    {
+      "api": "ema_historical_return",
+      "datasets": [
+        "stock_prices"
+      ],
+      "expected": {
+        "data": [
+          0.022439580452922714,
+          0.19432807124324358,
+          -0.01522781379104976,
+          0.14362165438603625,
+          0.6116496824254538,
+          -0.576387555078046,
+          -0.26682320241945445,
+          -0.04024302187179307,
+          0.22887200155997411,
+          0.052308681246131306,
+          -0.03650463989315034,
+          0.20716653797985773,
+          -0.18006744020647014,
+          -0.036954529521697976,
+          -0.2165939237735055,
+          0.47056470076511125,
+          0.4247258300377643,
+          0.07819268669699087,
+          0.25994409861673673,
+          0.14658098856528046
+        ],
+        "index": [
+          "GOOG",
+          "AAPL",
+          "FB",
+          "BABA",
+          "AMZN",
+          "GE",
+          "AMD",
+          "WMT",
+          "BAC",
+          "GM",
+          "T",
+          "UAA",
+          "SHLD",
+          "XOM",
+          "RRC",
+          "BBY",
+          "MA",
+          "PFE",
+          "JPM",
+          "SBUX"
+        ],
+        "name": "2018-04-11T00:00:00",
+        "type": "series"
+      },
+      "id": "api::pypfopt.expected_returns.ema_historical_return::span_180",
+      "params": {
+        "span": 180
       },
       "symbol": "pypfopt.expected_returns.ema_historical_return",
       "tolerance": {
@@ -6487,6 +6741,133 @@
     {
       "api": "mean_historical_return",
       "datasets": [
+        "stock_prices"
+      ],
+      "expected": {
+        "data": [
+          0.17891437418732453,
+          0.19520884370219468,
+          0.2457878169712189,
+          0.22616723023870225,
+          0.4524943571939424,
+          -0.14380806915308186,
+          0.465034663597819,
+          0.07826671710423859,
+          0.20879366077176725,
+          0.11157108302388939,
+          0.0663124497603584,
+          -0.10975783025510703,
+          -0.3384544684865141,
+          -0.011028146100836864,
+          -0.3114290334918675,
+          0.2909327706525766,
+          0.2539915392662035,
+          0.09686966452655078,
+          0.2172715897664792,
+          0.1634685308612116
+        ],
+        "index": [
+          "GOOG",
+          "AAPL",
+          "FB",
+          "BABA",
+          "AMZN",
+          "GE",
+          "AMD",
+          "WMT",
+          "BAC",
+          "GM",
+          "T",
+          "UAA",
+          "SHLD",
+          "XOM",
+          "RRC",
+          "BBY",
+          "MA",
+          "PFE",
+          "JPM",
+          "SBUX"
+        ],
+        "name": null,
+        "type": "series"
+      },
+      "id": "api::pypfopt.expected_returns.mean_historical_return::compounding_false",
+      "params": {
+        "compounding": false
+      },
+      "symbol": "pypfopt.expected_returns.mean_historical_return",
+      "tolerance": {
+        "atol": 1e-08,
+        "rtol": 1e-06
+      }
+    },
+    {
+      "api": "mean_historical_return",
+      "datasets": [
+        "stock_prices"
+      ],
+      "expected": {
+        "data": [
+          0.15278718417516,
+          0.1685369993426109,
+          0.21352686997566178,
+          0.17589800919811457,
+          0.41116263486798,
+          -0.16640300044372966,
+          0.2665827566183199,
+          0.057625886147209246,
+          0.17389577106665585,
+          0.08093030997555141,
+          0.05303416074149786,
+          -0.2011975955943003,
+          -0.5788098716914157,
+          -0.029115173158279467,
+          -0.436576718130927,
+          0.22828025301938734,
+          0.2334854387884324,
+          0.08154791171966155,
+          0.19392922963208087,
+          0.14345846031058662
+        ],
+        "index": [
+          "GOOG",
+          "AAPL",
+          "FB",
+          "BABA",
+          "AMZN",
+          "GE",
+          "AMD",
+          "WMT",
+          "BAC",
+          "GM",
+          "T",
+          "UAA",
+          "SHLD",
+          "XOM",
+          "RRC",
+          "BBY",
+          "MA",
+          "PFE",
+          "JPM",
+          "SBUX"
+        ],
+        "name": null,
+        "type": "series"
+      },
+      "id": "api::pypfopt.expected_returns.mean_historical_return::compounding_false_log_returns_true",
+      "params": {
+        "compounding": false,
+        "log_returns": true
+      },
+      "symbol": "pypfopt.expected_returns.mean_historical_return",
+      "tolerance": {
+        "atol": 1e-08,
+        "rtol": 1e-06
+      }
+    },
+    {
+      "api": "mean_historical_return",
+      "datasets": [
         "stock_prices_weekly"
       ],
       "expected": {
@@ -6540,6 +6921,69 @@
       "id": "api::pypfopt.expected_returns.mean_historical_return::frequency_52_weekly",
       "params": {
         "frequency": 52
+      },
+      "symbol": "pypfopt.expected_returns.mean_historical_return",
+      "tolerance": {
+        "atol": 1e-08,
+        "rtol": 1e-06
+      }
+    },
+    {
+      "api": "mean_historical_return",
+      "datasets": [
+        "stock_prices"
+      ],
+      "expected": {
+        "data": [
+          0.135522776932826,
+          0.15242264847450548,
+          0.19902013833700138,
+          0.13413595629006925,
+          0.4487897607568827,
+          -0.17226751507092353,
+          0.07738326840778975,
+          0.037518505368053345,
+          0.14896776808421097,
+          0.051546789589693276,
+          0.04052986556791627,
+          -0.25862749571208743,
+          -0.5578063635589967,
+          -0.04613600546129426,
+          -0.43007816078392247,
+          0.1813089457191417,
+          0.23744614435806133,
+          0.06854057350829401,
+          0.18600282602851426,
+          0.1312074123044713
+        ],
+        "index": [
+          "GOOG",
+          "AAPL",
+          "FB",
+          "BABA",
+          "AMZN",
+          "GE",
+          "AMD",
+          "WMT",
+          "BAC",
+          "GM",
+          "T",
+          "UAA",
+          "SHLD",
+          "XOM",
+          "RRC",
+          "BBY",
+          "MA",
+          "PFE",
+          "JPM",
+          "SBUX"
+        ],
+        "name": null,
+        "type": "series"
+      },
+      "id": "api::pypfopt.expected_returns.mean_historical_return::log_returns_true",
+      "params": {
+        "log_returns": true
       },
       "symbol": "pypfopt.expected_returns.mean_historical_return",
       "tolerance": {

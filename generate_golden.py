@@ -563,6 +563,41 @@ def build_api_specs(selected_modules: Sequence[str], data_root: Path) -> List[Ap
             params={"frequency": 52},
         ),
         ApiSpec(
+            api="mean_historical_return",
+            symbol="pypfopt.expected_returns.mean_historical_return",
+            module="expected_returns",
+            datasets=["stock_prices"],
+            tolerance=DEFAULT_TOLERANCE,
+            fn=lambda: expected_returns.mean_historical_return(df_clean, compounding=False),
+            case_id="api::pypfopt.expected_returns.mean_historical_return::compounding_false",
+            params={"compounding": False},
+        ),
+        ApiSpec(
+            api="mean_historical_return",
+            symbol="pypfopt.expected_returns.mean_historical_return",
+            module="expected_returns",
+            datasets=["stock_prices"],
+            tolerance=DEFAULT_TOLERANCE,
+            fn=lambda: expected_returns.mean_historical_return(df_clean, log_returns=True),
+            case_id="api::pypfopt.expected_returns.mean_historical_return::log_returns_true",
+            params={"log_returns": True},
+        ),
+        ApiSpec(
+            api="mean_historical_return",
+            symbol="pypfopt.expected_returns.mean_historical_return",
+            module="expected_returns",
+            datasets=["stock_prices"],
+            tolerance=DEFAULT_TOLERANCE,
+            fn=lambda: expected_returns.mean_historical_return(
+                df_clean, compounding=False, log_returns=True
+            ),
+            case_id=(
+                "api::pypfopt.expected_returns.mean_historical_return"
+                "::compounding_false_log_returns_true"
+            ),
+            params={"compounding": False, "log_returns": True},
+        ),
+        ApiSpec(
             api="ema_historical_return",
             symbol="pypfopt.expected_returns.ema_historical_return",
             module="expected_returns",
@@ -579,6 +614,51 @@ def build_api_specs(selected_modules: Sequence[str], data_root: Path) -> List[Ap
             fn=lambda: expected_returns.ema_historical_return(df_weekly_clean, frequency=52),
             case_id="api::pypfopt.expected_returns.ema_historical_return::frequency_52_weekly",
             params={"frequency": 52},
+        ),
+        ApiSpec(
+            api="ema_historical_return",
+            symbol="pypfopt.expected_returns.ema_historical_return",
+            module="expected_returns",
+            datasets=["stock_prices"],
+            tolerance=DEFAULT_TOLERANCE,
+            fn=lambda: expected_returns.ema_historical_return(df_clean, compounding=False),
+            case_id="api::pypfopt.expected_returns.ema_historical_return::compounding_false",
+            params={"compounding": False},
+        ),
+        ApiSpec(
+            api="ema_historical_return",
+            symbol="pypfopt.expected_returns.ema_historical_return",
+            module="expected_returns",
+            datasets=["stock_prices"],
+            tolerance=DEFAULT_TOLERANCE,
+            fn=lambda: expected_returns.ema_historical_return(df_clean, log_returns=True),
+            case_id="api::pypfopt.expected_returns.ema_historical_return::log_returns_true",
+            params={"log_returns": True},
+        ),
+        ApiSpec(
+            api="ema_historical_return",
+            symbol="pypfopt.expected_returns.ema_historical_return",
+            module="expected_returns",
+            datasets=["stock_prices"],
+            tolerance=DEFAULT_TOLERANCE,
+            fn=lambda: expected_returns.ema_historical_return(df_clean, span=180),
+            case_id="api::pypfopt.expected_returns.ema_historical_return::span_180",
+            params={"span": 180},
+        ),
+        ApiSpec(
+            api="ema_historical_return",
+            symbol="pypfopt.expected_returns.ema_historical_return",
+            module="expected_returns",
+            datasets=["stock_prices"],
+            tolerance=DEFAULT_TOLERANCE,
+            fn=lambda: expected_returns.ema_historical_return(
+                df_clean, compounding=False, log_returns=True, span=180
+            ),
+            case_id=(
+                "api::pypfopt.expected_returns.ema_historical_return"
+                "::compounding_false_log_returns_true_span_180"
+            ),
+            params={"compounding": False, "log_returns": True, "span": 180},
         ),
         ApiSpec(
             api="risk_matrix",

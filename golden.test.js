@@ -367,6 +367,9 @@ function buildApiScenarioExecutors() {
         returnModel(ctx.cleanRows, {
           method: params.method ?? 'mean_historical_return',
           frequency: params.frequency ?? 252,
+          compounding: params.compounding ?? true,
+          span: params.span ?? 500,
+          logReturns: params.log_returns ?? false,
         }),
         ctx.tickers,
         null,
@@ -374,14 +377,23 @@ function buildApiScenarioExecutors() {
 
     'pypfopt.expected_returns.mean_historical_return': (ctx, params = {}) =>
       seriesOf(
-        meanHistoricalReturn(ctx.cleanRows, { frequency: params.frequency ?? 252 }),
+        meanHistoricalReturn(ctx.cleanRows, {
+          frequency: params.frequency ?? 252,
+          compounding: params.compounding ?? true,
+          logReturns: params.log_returns ?? false,
+        }),
         ctx.tickers,
         null,
       ),
 
     'pypfopt.expected_returns.ema_historical_return': (ctx, params = {}) =>
       seriesOf(
-        emaHistoricalReturn(ctx.cleanRows, { frequency: params.frequency ?? 252 }),
+        emaHistoricalReturn(ctx.cleanRows, {
+          frequency: params.frequency ?? 252,
+          compounding: params.compounding ?? true,
+          span: params.span ?? 500,
+          logReturns: params.log_returns ?? false,
+        }),
         ctx.tickers,
         ctx.lastDateIso,
       ),
