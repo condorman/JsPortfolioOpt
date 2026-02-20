@@ -1,15 +1,19 @@
 # JsPortfolioOpt
 
-JavaScript implementation of PyPortfolioOpt-like logic.
+JavaScript parity layer for PyPortfolioOpt.
 Reference docs: https://pyportfolioopt.readthedocs.io/en/latest/index.html
 
-## Repository Goals
+## Current project layout
 
-1. Build a deterministic golden fixture from `references/PyPortfolioOpt-main`.
-2. Use the golden fixture as parity baseline for JS porting.
-3. Expose Python-style API + JS-friendly aliases.
+- Python reference library is loaded from the local venv install: `.venv_golden/lib/python3.9/site-packages/pypfopt`
+- Golden/parity datasets are in `./data`:
+  - `data/stock_prices.csv`
+  - `data/spy_prices.csv`
+  - `data/cov_matrix.csv`
+- Generated fixture path: `golden-PyPortfolioOpt/golden.json`
+- JS parity test entrypoint: `golden.test.js`
 
-## Python Setup (Golden Generation)
+## Python setup (golden generation)
 
 ```bash
 python3 -m venv .venv_golden
@@ -18,35 +22,60 @@ pip install -U pip
 pip install -r requirements.in
 ```
 
+`requirements.in` currently contains only:
 
-Output:
+```txt
+PyPortfolioOpt
+```
 
-- `golden-PyPortfolioOpt/golden.json`
-- Includes:
-  - `python_test_function` scenarios (upstream test traceability)
-  - `extra_api_scenario` scenarios
-  - `api_method_scenario` for every symbol in `PUBLIC_API`, each with `expected.result` non-null
+## Generate golden fixture
 
-## Golden CLI
+Default run:
 
-`generate_golden.py` supports:
+```bash
+.venv_golden/bin/python generate_golden.py
+```
 
-- `--baseline-root`
-- `--output`
-- `--modules`
-- `--include-skipif`
-- `--strict`
-- `--seed`
+This generates `golden-PyPortfolioOpt/golden.json`.
+
+CLI options currently supported:
+
+- `--baseline-root` (default: `.venv_golden/lib/python3.9/site-packages`)
+- `--data-root` (default: `data`)
+- `--output` (default: `golden-PyPortfolioOpt/golden.json`)
+- `--modules` (default: `all`)
+- `--seed` (default: `1337`)
 - `--fail-on-missing`
 
-## JS Setup
+Accepted module names for `--modules`:
+
+- `expected_returns`
+- `risk_models`
+- `objective_functions`
+- `discrete_allocation`
+- `black_litterman`
+- `cla`
+- `hrp`
+- `base_optimizer`
+- `efficient_frontier`
+- `efficient_semivariance`
+- `efficient_cvar`
+- `efficient_cdar`
+
+Example:
+
+```bash
+.venv_golden/bin/python generate_golden.py --modules expected_returns,risk_models --fail-on-missing
+```
+
+## JS setup and parity test
 
 ```bash
 npm install
-npm test
+npm test -- golden.test.js
 ```
 
-## JS Module Layout
+## JS module layout
 
 - `src/expected_returns.js`
 - `src/risk_models.js`
@@ -58,12 +87,3 @@ npm test
 - `src/discrete_allocation.js`
 - `src/custom.js` (JS-only extensions, not part of PyPortfolioOpt)
 - `src/index.js`
-
-Note: the pure-JS backend is now partially implemented for core optimizers and utilities.
-Exact solver parity with PyPortfolioOpt (especially CLA/convex edge-cases) is still in progress.
-
-Custom extension example:
-
-```js
-import { getPrior } from 'jsportfolioopt'
-```
