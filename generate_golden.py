@@ -90,6 +90,54 @@ class ApiSpec:
     case_id: str | None = None
     params: Dict[str, Any] | None = None
 
+"""
+Custom prior generation for black-litterman tests
+returns: DataFrame of asset returns
+mu: Series of expected returns (optional, only for momentum_positive) see mean_historical_return or ema_historical_return
+prior_method: Method to generate the prior ("equal_weighted", "risk_parity", "inverse_variance", "momentum_positive", "blend_eq_inv_vol")
+prior_blend_alpha: Blending factor for "blend_eq_inv_vol" method
+"""
+def get_prior(returns, mu=None, prior_method="equal_weighted", prior_blend_alpha=0.5):
+
+    if prior_method == "risk_parity":
+        vol = returns.std()
+        vol = vol.replace(0, vol[vol > 0].min() if (vol > 0).any() else 1e-6)
+        inv_vol = 1 / vol
+        return inv_vol / inv_vol.sum()
+
+    elif prior_method == "inverse_variance":
+        var = returns.var()
+        var = var.replace(0, var[var > 0].min() if (var > 0).any() else 1e-6)
+        inv_var = 1 / var
+        return inv_var / inv_var.sum()
+
+    elif prior_method == "momentum_positive":
+
+        if mu is None:
+            raise ValueError("Per il metodo 'momentum_positive', è necessario fornire 'mu'.")
+
+        mu_pos = mu.clip(lower=0.0)
+        if mu_pos.sum() <= 0:
+            return pd.Series(1.0 / len(returns.columns), index=returns.columns)
+        else:
+            return mu_pos / mu_pos.sum()
+
+    elif prior_method == "blend_eq_inv_vol":
+        vol = returns.std()
+        vol = vol.replace(0, vol[vol > 0].min() if (vol > 0).any() else 1e-6)
+        inv_vol = 1 / vol
+        inv_vol = inv_vol / inv_vol.sum()
+        alpha = prior_blend_alpha
+        alpha = min(max(alpha, 0.0), 1.0)
+        eq = pd.Series(1.0 / len(returns.columns), index=returns.columns)
+        return alpha * eq + (1 - alpha) * inv_vol
+
+    elif prior_method == "equal_weighted":
+        n = len(returns.columns)
+        return pd.Series(1.0/n, index=returns.columns)
+    
+    else:
+        raise ValueError(f"Metodo prior non supportato: {prior_method}")
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
