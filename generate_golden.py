@@ -44,7 +44,6 @@ INVARIANT_TOLERANCE = {"atol": 0.0, "rtol": 0.0}
 DATASET_FILES = {
     "stock_prices": "stock_prices.csv",
     "spy_prices": "spy_prices.csv",
-    "cov_matrix": "cov_matrix.csv",
 }
 
 MARKET_CAPS = {
@@ -173,7 +172,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--data-root",
         default=str(DEFAULT_DATA_ROOT),
-        help="Path containing stock_prices.csv, spy_prices.csv and cov_matrix.csv",
+        help="Path containing stock_prices.csv, spy_prices.csv",
     )
     parser.add_argument(
         "--output",
@@ -469,6 +468,18 @@ def build_api_specs(selected_modules: Sequence[str], data_root: Path) -> List[Ap
             "bl_cov": bl_cov,
             "bl_weights": bl_weights,
             "portfolio_performance": perf,
+        }
+
+    def black_litterman_efficient_frontier_payload(*, tau: float) -> Dict[str, Any]:
+        bl = BlackLittermanModel(
+            cov,
+            pi=prior,
+            absolute_views=absolute_views,
+            tau=tau,
+        )
+        ef = EfficientFrontier(bl.bl_returns(), bl.bl_cov())
+        return {
+            "min_volatility": ef.min_volatility(),
         }
 
     def custom_prior_for_bl(
@@ -907,6 +918,20 @@ def build_api_specs(selected_modules: Sequence[str], data_root: Path) -> List[Ap
                         ef.portfolio_performance(risk_free_rate=0.02),
                     )[1]
                 )(),
+            },
+        ),
+        ApiSpec(
+            api="EfficientFrontier",
+            symbol="pypfopt.efficient_frontier.EfficientFrontier",
+            module="efficient_frontier",
+            datasets=["stock_prices"],
+            tolerance=SOLVER_SENSITIVE_TOLERANCE,
+            fn=lambda: black_litterman_efficient_frontier_payload(tau=0.05),
+            case_id="api::pypfopt.efficient_frontier.EfficientFrontier::bl_returns_bl_cov_min_volatility",
+            params={
+                "input_returns": "BlackLittermanModel.bl_returns",
+                "input_cov": "BlackLittermanModel.bl_cov",
+                "tau": 0.05,
             },
         ),
         ApiSpec(

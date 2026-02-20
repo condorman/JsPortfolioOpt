@@ -1,8 +1,7 @@
 {
   "datasets": {
-    "cov_matrix": "/Users/alessandromizzoni/Documents/Progetti/jsportfolioopt/references/PyPortfolioOpt-main/tests/resources/cov_matrix.csv",
-    "spy_prices": "/Users/alessandromizzoni/Documents/Progetti/jsportfolioopt/references/PyPortfolioOpt-main/tests/resources/spy_prices.csv",
-    "stock_prices": "/Users/alessandromizzoni/Documents/Progetti/jsportfolioopt/references/PyPortfolioOpt-main/tests/resources/stock_prices.csv"
+    "spy_prices": "/Users/alessandromizzoni/Documents/Progetti/jsportfolioopt/data/spy_prices.csv",
+    "stock_prices": "/Users/alessandromizzoni/Documents/Progetti/jsportfolioopt/data/stock_prices.csv"
   },
   "tests": [
     {
@@ -5935,26 +5934,26 @@
           "XOM": 0.118483318407125
         },
         "efficient_risk": {
-          "AAPL": 1.147511e-10,
-          "AMD": 5.247607e-10,
-          "AMZN": 0.9999999981698264,
-          "BABA": 1.599185e-10,
-          "BAC": 1.038327e-10,
-          "BBY": 7.80973e-11,
-          "FB": 2.043647e-10,
-          "GE": 9.2094e-12,
-          "GM": 6.07347e-11,
-          "GOOG": 1.749987e-10,
-          "JPM": 8.03815e-11,
-          "MA": 1.101416e-10,
-          "PFE": 4.06304e-11,
-          "RRC": -1.75751e-11,
-          "SBUX": 9.42886e-11,
-          "SHLD": -3.07551e-11,
-          "T": 3.08494e-11,
-          "UAA": 2.77626e-11,
-          "WMT": 3.23549e-11,
-          "XOM": 3.14396e-11
+          "AAPL": 1.147491e-10,
+          "AMD": 5.247361e-10,
+          "AMZN": 0.9999999981698136,
+          "BABA": 1.59913e-10,
+          "BAC": 1.038323e-10,
+          "BBY": 7.8099e-11,
+          "FB": 2.043554e-10,
+          "GE": 9.2162e-12,
+          "GM": 6.07379e-11,
+          "GOOG": 1.749913e-10,
+          "JPM": 8.03826e-11,
+          "MA": 1.101392e-10,
+          "PFE": 4.06356e-11,
+          "RRC": -1.7569e-11,
+          "SBUX": 9.42881e-11,
+          "SHLD": -3.07469e-11,
+          "T": 3.08555e-11,
+          "UAA": 2.7765e-11,
+          "WMT": 3.23609e-11,
+          "XOM": 3.14452e-11
         },
         "max_quadratic_utility": {
           "AAPL": 0.0,
@@ -6029,6 +6028,47 @@
         ]
       },
       "id": "api::pypfopt.efficient_frontier.EfficientFrontier",
+      "symbol": "pypfopt.efficient_frontier.EfficientFrontier",
+      "tolerance": {
+        "atol": 0.0001,
+        "rtol": 0.001
+      }
+    },
+    {
+      "api": "EfficientFrontier",
+      "datasets": [
+        "stock_prices"
+      ],
+      "expected": {
+        "min_volatility": {
+          "AAPL": 0.0351770720465003,
+          "AMD": 0.0,
+          "AMZN": 0.0121203823647238,
+          "BABA": 0.0271349671007081,
+          "BAC": 0.0,
+          "BBY": 0.0148922826632573,
+          "FB": 0.0136874789059646,
+          "GE": 0.0329837397504856,
+          "GM": 0.0,
+          "GOOG": 0.0124193445625487,
+          "JPM": 0.0,
+          "MA": 0.0,
+          "PFE": 0.1906506441691157,
+          "RRC": 0.0,
+          "SBUX": 0.1150610420432119,
+          "SHLD": 0.0,
+          "T": 0.2841363776464435,
+          "UAA": 0.0,
+          "WMT": 0.1380574337188502,
+          "XOM": 0.1236792350281904
+        }
+      },
+      "id": "api::pypfopt.efficient_frontier.EfficientFrontier::bl_returns_bl_cov_min_volatility",
+      "params": {
+        "input_cov": "BlackLittermanModel.bl_cov",
+        "input_returns": "BlackLittermanModel.bl_returns",
+        "tau": 0.05
+      },
       "symbol": "pypfopt.efficient_frontier.EfficientFrontier",
       "tolerance": {
         "atol": 0.0001,

@@ -562,28 +562,51 @@ function buildApiScenarioExecutors(ctx) {
       }
     },
 
-    'pypfopt.efficient_frontier.EfficientFrontier': () => ({
-      min_volatility: new EfficientFrontier(ctx.muVector, ctx.covMatrix, {
-        tickers: ctx.tickers,
-      }).minVolatility(),
-      max_sharpe: new EfficientFrontier(ctx.muVector, ctx.covMatrix, {
-        tickers: ctx.tickers,
-      }).maxSharpe({ riskFreeRate: 0.02 }),
-      max_quadratic_utility: new EfficientFrontier(ctx.muVector, ctx.covMatrix, {
-        tickers: ctx.tickers,
-      }).maxQuadraticUtility({ riskAversion: 1.0 }),
-      efficient_return: new EfficientFrontier(ctx.muVector, ctx.covMatrix, {
-        tickers: ctx.tickers,
-      }).efficientReturn(percentileLinear(ctx.muVector, 40)),
-      efficient_risk: new EfficientFrontier(ctx.muVector, ctx.covMatrix, {
-        tickers: ctx.tickers,
-      }).efficientRisk(0.3),
-      portfolio_performance: (() => {
-        const ef = new EfficientFrontier(ctx.muVector, ctx.covMatrix, { tickers: ctx.tickers })
-        ef.minVolatility()
-        return ef.portfolioPerformance({ riskFreeRate: 0.02 })
-      })(),
-    }),
+    'pypfopt.efficient_frontier.EfficientFrontier': (params = {}) => {
+      if (
+        params.input_returns === 'BlackLittermanModel.bl_returns' &&
+        params.input_cov === 'BlackLittermanModel.bl_cov'
+      ) {
+        const bl = new BlackLittermanModel(ctx.covMatrix, {
+          pi: ctx.prior,
+          absoluteViews: ctx.absoluteViews,
+          tickers: ctx.tickers,
+          tau: params.tau ?? 0.05,
+        })
+        const blReturnsByTicker = bl.blReturns()
+        const ef = new EfficientFrontier(
+          ctx.tickers.map((ticker) => blReturnsByTicker[ticker]),
+          bl.blCov(),
+          { tickers: ctx.tickers },
+        )
+        return {
+          min_volatility: ef.minVolatility(),
+        }
+      }
+
+      return {
+        min_volatility: new EfficientFrontier(ctx.muVector, ctx.covMatrix, {
+          tickers: ctx.tickers,
+        }).minVolatility(),
+        max_sharpe: new EfficientFrontier(ctx.muVector, ctx.covMatrix, {
+          tickers: ctx.tickers,
+        }).maxSharpe({ riskFreeRate: 0.02 }),
+        max_quadratic_utility: new EfficientFrontier(ctx.muVector, ctx.covMatrix, {
+          tickers: ctx.tickers,
+        }).maxQuadraticUtility({ riskAversion: 1.0 }),
+        efficient_return: new EfficientFrontier(ctx.muVector, ctx.covMatrix, {
+          tickers: ctx.tickers,
+        }).efficientReturn(percentileLinear(ctx.muVector, 40)),
+        efficient_risk: new EfficientFrontier(ctx.muVector, ctx.covMatrix, {
+          tickers: ctx.tickers,
+        }).efficientRisk(0.3),
+        portfolio_performance: (() => {
+          const ef = new EfficientFrontier(ctx.muVector, ctx.covMatrix, { tickers: ctx.tickers })
+          ef.minVolatility()
+          return ef.portfolioPerformance({ riskFreeRate: 0.02 })
+        })(),
+      }
+    },
 
     'pypfopt.efficient_frontier.EfficientSemivariance': () => ({
       min_semivariance: new EfficientSemivariance(ctx.muVector, ctx.returnsMatrix, {
