@@ -3,11 +3,31 @@
   "version": "0.1.0",
   "description": "JavaScript parity layer for PyPortfolioOpt",
   "type": "module",
-  "main": "src/index.js",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.mjs",
+  "browser": "./dist/index.browser.js",
   "exports": {
-    ".": "./src/index.js"
+    ".": {
+      "browser": "./dist/index.browser.js",
+      "import": "./dist/index.mjs",
+      "require": "./dist/index.cjs",
+      "default": "./dist/index.mjs"
+    }
   },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "unpkg": "./dist/index.browser.js",
+  "jsdelivr": "./dist/index.browser.js",
   "scripts": {
+    "clean": "rm -rf dist",
+    "build:esm": "esbuild src/index.js --bundle --format=esm --platform=node --target=es2020 --outfile=dist/index.mjs",
+    "build:cjs": "esbuild src/index.js --bundle --format=cjs --platform=node --target=node18 --outfile=dist/index.cjs",
+    "build:browser": "esbuild src/index.js --bundle --format=iife --global-name=JsPortfolioOpt --platform=browser --target=es2020 --alias:fs=./src/_browser/fs-shim.cjs --alias:child_process=./src/_browser/child-process-shim.cjs --outfile=dist/index.browser.js",
+    "build": "npm run clean && npm run build:esm && npm run build:cjs && npm run build:browser",
+    "prepack": "npm run build",
     "test": "vitest run --reporter=verbose"
   },
   "dependencies": {
@@ -16,6 +36,7 @@
     "quadprog": "^1.6.1"
   },
   "devDependencies": {
+    "esbuild": "^0.21.5",
     "vitest": "^2.1.9"
   }
 }
