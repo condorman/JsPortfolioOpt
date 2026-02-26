@@ -1,7 +1,7 @@
 # Envs
 .venv_*
 
-dist
+
 
 # Node.js
 node_modules/
