@@ -1,7 +1,7 @@
 # Envs
 .venv_*
-
-
+golden-PyPortfolioOpt
+dist
 
 # Node.js
 node_modules/
